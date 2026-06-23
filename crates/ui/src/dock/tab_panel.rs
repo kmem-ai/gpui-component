@@ -361,11 +361,16 @@ impl TabGroupSkin {
         cx: &mut App,
     ) -> AnyElement {
         let panel = &group.panels()[ix];
+        let handle = PanelHandle::of(panel);
+        // A panel can suppress its title bar entirely — for hosts that draw their own tile chrome
+        // and don't want the dock's title strip + control menu (e.g. a tiling window manager).
+        if handle.is_some_and(|handle| !handle.show_title_bar(cx)) {
+            return Empty.into_any_element();
+        }
         let left_button = self.dock_toggle_button(DockPlacement::Left, group, cx);
         let bottom_button = self.dock_toggle_button(DockPlacement::Bottom, group, cx);
         let right_button = self.dock_toggle_button(DockPlacement::Right, group, cx);
         let has_leading = left_button.is_some() || bottom_button.is_some();
-        let handle = PanelHandle::of(panel);
         let title_style = handle.and_then(|handle| handle.title_style(cx));
         let drag = tab_drag(group, ix, cx);
 
