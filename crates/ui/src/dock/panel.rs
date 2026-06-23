@@ -161,6 +161,15 @@ pub trait Panel: EventEmitter<PanelEvent> + Render + Focusable {
     fn inner_padding(&self, cx: &App) -> bool {
         true
     }
+
+    /// Whether the panel shows its title bar in the single-panel (non-tabbed) layout, default is `true`.
+    ///
+    /// Return `false` to suppress the title bar entirely. Used by hosts that draw their own tile
+    /// chrome (e.g. a window manager placing panels as free-floating tiles) and do not want the
+    /// dock's title strip + control menu on top of it.
+    fn show_title_bar(&self, cx: &App) -> bool {
+        true
+    }
 }
 
 /// The PanelView trait used to define the panel view.
@@ -185,6 +194,7 @@ pub trait PanelView: 'static + Send + Sync {
     fn focus_handle(&self, cx: &App) -> FocusHandle;
     fn dump(&self, cx: &App) -> PanelState;
     fn inner_padding(&self, cx: &App) -> bool;
+    fn show_title_bar(&self, cx: &App) -> bool;
 }
 
 impl<T: Panel> PanelView for Entity<T> {
@@ -269,6 +279,10 @@ impl<T: Panel> PanelView for Entity<T> {
 
     fn inner_padding(&self, cx: &App) -> bool {
         self.read(cx).inner_padding(cx)
+    }
+
+    fn show_title_bar(&self, cx: &App) -> bool {
+        self.read(cx).show_title_bar(cx)
     }
 }
 

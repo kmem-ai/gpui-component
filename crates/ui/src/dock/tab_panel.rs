@@ -635,6 +635,12 @@ impl TabPanel {
                 return div().into_any_element();
             }
 
+            // A panel can suppress its title bar entirely — for hosts that draw their own tile chrome
+            // and don't want the dock's title strip + control menu (e.g. a tiling window manager).
+            if !panel.show_title_bar(cx) {
+                return div().into_any_element();
+            }
+
             let title_style = panel.title_style(cx);
 
             return h_flex()
