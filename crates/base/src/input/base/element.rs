@@ -298,6 +298,22 @@ fn editor_gutter_bounds(
     }
 }
 
+/// Normalise a single-line input's value so it can be shaped as exactly one visual line.
+///
+/// A single-line input shapes its whole value in one `shape_line` call, but gpui's text system
+/// panics on a newline in that argument ("text argument should not contain newlines"). A value can
+/// still carry newlines — e.g. a multi-line paste — so any CR/LF is replaced with a space. The
+/// replacement is byte-length-preserving (CR, LF, and the replacement space are each one byte), so
+/// the caller's `runs` and the cursor/selection byte offsets stay aligned. The newline-free value
+/// is returned untouched (no allocation); only the rendering is normalised, never the stored text.
+fn single_line_display(text: String) -> String {
+    if text.contains(['\n', '\r']) {
+        text.replace(['\n', '\r'], " ")
+    } else {
+        text
+    }
+}
+
 use super::MASK_CHAR;
 
 /// Convert a byte offset in the original text to a byte offset in the masked display string.
@@ -1304,7 +1320,11 @@ impl<M: InputModeKind> TextElement<M> {
         let is_single_line = state.is_single_line();
 
         if is_single_line {
-            let text: SharedString = display_text.to_string().into();
+            // Shape the whole value as one visual line. `single_line_display` keeps it shapeable when
+            // the value carries newlines (gpui's `shape_line` panics on a newline) without disturbing
+            // byte offsets, so `runs` and the cursor/selection stay aligned and the stored value keeps
+            // its newlines.
+            let text: SharedString = single_line_display(display_text.to_string()).into();
             let aligned_runs = align_runs_to_char_boundaries(&text, runs);
             let line_runs = aligned_runs.as_deref().unwrap_or(runs);
             let shaped_line = window
@@ -2713,6 +2733,29 @@ mod tests {
         assert_eq!(styles[1].0, 2..6);
         assert_eq!(styles[1].1.color, Some(gpui::red()));
         assert_eq!(styles[1].1.font_style, Some(gpui::FontStyle::Italic));
+    }
+
+    #[test]
+    fn single_line_display_replaces_newlines_with_spaces() {
+        // A single-line input must never hand shape_line a newline (it panics); LF/CR become spaces.
+        assert_eq!(
+            single_line_display("alpha\nbravo".to_string()),
+            "alpha bravo"
+        );
+        assert_eq!(single_line_display("a\r\nb".to_string()), "a  b");
+    }
+
+    #[test]
+    fn single_line_display_preserves_byte_length_so_runs_stay_aligned() {
+        // The replacement is byte-for-byte so the caller's runs and cursor offsets remain valid.
+        let value = "x\ny\rz".to_string();
+        let len = value.len();
+        assert_eq!(single_line_display(value).len(), len);
+    }
+
+    #[test]
+    fn single_line_display_leaves_a_newline_free_value_untouched() {
+        assert_eq!(single_line_display("plain text".to_string()), "plain text");
     }
 
     #[test]
