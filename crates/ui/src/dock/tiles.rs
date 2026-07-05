@@ -1043,7 +1043,11 @@ impl Tiles {
 
         v_flex()
             .occlude()
-            .bg(cx.theme().background)
+            // The per-tile frame fills with the `tiles` token (which falls back to `background`, so this is
+            // identical for the default theme) rather than `background` directly. This lets a consumer make
+            // the tile frame transparent — via `tiles` — so a translucent/frosted panel can reveal an ambient
+            // layer painted behind the dock, without the frame's own opaque fill blocking it.
+            .bg(cx.theme().tiles)
             .border_1()
             .border_color(cx.theme().border)
             .absolute()
