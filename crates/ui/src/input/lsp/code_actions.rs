@@ -43,6 +43,15 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // No code-action provider is registered (e.g. a plain text input with no LSP attached): there is
+        // nothing to toggle, so propagate the key rather than swallow it. This lets a consumer bind
+        // `cmd-.` / `ctrl-.` at a higher level (e.g. an app-level "un-maximize" chord) and have it fire
+        // when the focused input has no code actions of its own — mirroring `indent()`'s propagate-when-
+        // not-indentable guard.
+        if self.lsp.code_action_providers.is_empty() {
+            cx.propagate();
+            return;
+        }
         self.handle_code_action_trigger(window, cx)
     }
 
