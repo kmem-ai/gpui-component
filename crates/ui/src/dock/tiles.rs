@@ -141,6 +141,11 @@ pub struct Tiles {
     history: History<TileChange>,
     scroll_handle: ScrollHandle,
     scrollbar_show: Option<ScrollbarShow>,
+    /// Whether panels expose per-tile drag-resize handles (the edge grips + the bottom-right resize
+    /// corner). `true` by default — the historical behaviour. A consumer that owns tile geometry itself
+    /// (e.g. an external layout solver) sets this `false` via [`Tiles::set_resizable`] so no tile shows a
+    /// resize affordance it cannot honour.
+    resizable: bool,
 }
 
 impl Panel for Tiles {
@@ -195,7 +200,15 @@ impl Tiles {
             bounds: Bounds::default(),
             history: History::new().group_interval(std::time::Duration::from_millis(100)),
             scroll_handle: ScrollHandle::default(),
+            resizable: true,
         }
+    }
+
+    /// Enable or disable per-tile drag-resize handles for every panel in this canvas. Defaults to `true`.
+    /// Set `false` when an outer system owns tile geometry (positions and sizes come from a layout solver,
+    /// not user drags), so the tiles show no resize corner/edge handles the layout would immediately undo.
+    pub fn set_resizable(&mut self, resizable: bool) {
+        self.resizable = resizable;
     }
 
     /// Set the scrollbar show mode [`ScrollbarShow`], if not set use the `cx.theme().scrollbar_show`.
@@ -649,6 +662,12 @@ impl Tiles {
         entity_id: EntityId,
         item: &TileItem,
     ) -> Vec<AnyElement> {
+        // A canvas whose geometry is owned externally (see `set_resizable`) shows no resize affordances at
+        // all — not the edge grips, not the bottom-right resize corner — since a user resize would be undone
+        // by the owning layout on the next frame.
+        if !self.resizable {
+            return Vec::new();
+        }
         let item_id = item.id;
         let item_bounds = item.bounds;
         let handle_offset = -HANDLE_SIZE + px(1.);
