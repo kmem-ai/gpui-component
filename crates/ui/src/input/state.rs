@@ -1994,7 +1994,9 @@ impl InputState {
         if let Some(clipboard) = cx.read_from_clipboard() {
             let mut new_text = clipboard.text().unwrap_or_default();
             if !self.mode.is_multi_line() {
-                new_text = new_text.replace('\n', "");
+                // Strip CR too: a CRLF clipboard (Windows line endings) must not smuggle a
+                // carriage return into a single-line value — it already stripped LF.
+                new_text = new_text.replace(['\r', '\n'], "");
             }
 
             self.replace_text_in_range_silent(None, &new_text, window, cx);
@@ -3091,6 +3093,29 @@ mod tests {
                 window_handle: window,
             }
         }
+    }
+
+    #[gpui::test]
+    fn single_line_paste_strips_cr_and_lf(cx: &mut TestAppContext) {
+        // A CRLF/LF/CR clipboard must land as one clean line in a single-line input.
+        let input_view = InputView::build(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(
+                "alpha\r\nbeta\rgamma".to_string(),
+            ));
+            input.update(cx, |state, cx| {
+                state.paste(&Paste, window, cx);
+            });
+        });
+
+        cx.update(|_, cx| {
+            input.read_with(cx, |state, _| {
+                assert_eq!(state.text().to_string().as_str(), "alphabetagamma");
+            })
+        });
     }
 
     #[gpui::test]
