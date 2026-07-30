@@ -1485,6 +1485,24 @@ impl InputState {
         self.disabled = was_disabled;
     }
 
+    /// Undo one history step (the public wrapper for host-side modal
+    /// editors — kcode's composer vim mode `u`). Behaves exactly like the
+    /// input's own `Undo` action, including while the input is disabled.
+    pub fn undo_last(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let was_disabled = self.disabled;
+        self.disabled = false;
+        self.undo(&Undo, window, cx);
+        self.disabled = was_disabled;
+    }
+
+    /// Redo one history step (kcode's composer vim mode `ctrl-r`).
+    pub fn redo_last(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let was_disabled = self.disabled;
+        self.disabled = false;
+        self.redo(&Redo, window, cx);
+        self.disabled = was_disabled;
+    }
+
     pub(super) fn delete_to_beginning_of_line(
         &mut self,
         _: &DeleteToBeginningOfLine,
