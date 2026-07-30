@@ -1456,6 +1456,35 @@ impl InputState {
         self.pause_blink_cursor(cx);
     }
 
+    /// Delete an absolute UTF-8 byte range, leaving the cursor at its start.
+    ///
+    /// The public operator primitive for host-side modal editors (kcode's
+    /// composer vim mode — `x`/`dd`/`D`/`cc`): the host computes the span
+    /// and drives the deletion here so history (undo) and the change event
+    /// behave exactly like a built-in deletion. A no-op on an empty or
+    /// out-of-bounds range.
+    pub fn delete_range(
+        &mut self,
+        range: std::ops::Range<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let start = range.start.min(self.text.len());
+        let end = range.end.min(self.text.len());
+        if start >= end {
+            return;
+        }
+        // Mirror `insert`/`replace`: an explicit host-driven edit lands even
+        // while the input is disabled (a modal editor's NORMAL mode renders
+        // the input disabled precisely so *keyboard* edits stop reaching it).
+        let was_disabled = self.disabled;
+        self.disabled = false;
+        self.selected_range = (start..end).into();
+        self.replace_text_in_range(None, "", window, cx);
+        self.pause_blink_cursor(cx);
+        self.disabled = was_disabled;
+    }
+
     pub(super) fn delete_to_beginning_of_line(
         &mut self,
         _: &DeleteToBeginningOfLine,
