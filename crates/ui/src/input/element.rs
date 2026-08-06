@@ -23,6 +23,16 @@ use crate::{
 
 use super::{InputState, LastLayout, WhitespaceIndicators, mode::InputMode};
 
+/// The row height the input lays out and paints with: the authored line height, but never
+/// shorter than the resolved font's own box (1.25×) — a consumer that enlarges the input's
+/// font (a reading-tier composer) grows the rows with it instead of clipping taller glyphs
+/// into default-size rows.
+fn row_line_height(window: &Window) -> Pixels {
+    let font_px = window.text_style().font_size.to_pixels(window.rem_size());
+    window.line_height().max(font_px * 1.25)
+}
+
+
 const BOTTOM_MARGIN_ROWS: usize = 3;
 pub(super) const RIGHT_MARGIN: Pixels = px(10.);
 pub(super) const LINE_NUMBER_RIGHT_MARGIN: Pixels = px(10.);
@@ -1531,7 +1541,7 @@ impl Element for TextElement {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let state = self.state.read(cx);
-        let line_height = window.line_height();
+        let line_height = row_line_height(window);
 
         let mut style = Style::default();
         style.size.width = relative(1.).into();
@@ -1572,7 +1582,7 @@ impl Element for TextElement {
         });
 
         let state = self.state.read(cx);
-        let line_height = window.line_height();
+        let line_height = row_line_height(window);
 
         let (visible_range, visible_buffer_lines, visible_top) =
             self.calculate_visible_range(&state, line_height, bounds.size.height);
@@ -1990,7 +2000,7 @@ impl Element for TextElement {
         });
 
         // Paint multi line text
-        let line_height = window.line_height();
+        let line_height = row_line_height(window);
         let origin = bounds.origin;
 
         let invisible_top_padding = prepaint.last_layout.visible_top;
