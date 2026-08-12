@@ -1963,6 +1963,14 @@ impl Element for TextElement {
         cx: &mut App,
     ) {
         let focus_handle = self.state.read(cx).focus_handle.clone();
+        // kcode: an always-on caret never gets the on_focus kick — start its blink ticker on the
+        // first paint instead (gated on `started`, so this runs exactly once).
+        if self.state.read(cx).caret_always {
+            let blink = self.state.read(cx).blink_cursor.clone();
+            if !blink.read(cx).started() {
+                blink.update(cx, |b, cx| b.start(cx));
+            }
+        }
         let show_cursor = self.state.read(cx).show_cursor(window, cx);
         let focused = focus_handle.is_focused(window);
         let bounds = prepaint.bounds;
@@ -2141,8 +2149,9 @@ impl Element for TextElement {
             }
         }
 
-        // Paint blinking cursor
-        if focused && show_cursor {
+        // Paint blinking cursor. kcode: `caret_always` paints without focus — `show_cursor` already
+        // folded the flag into its condition, so here it just widens the same gate.
+        if (focused || self.state.read(cx).caret_always) && show_cursor {
             if let Some(cursor_bounds) = prepaint.cursor_bounds_with_scroll() {
                 window.paint_quad(fill(cursor_bounds, cx.theme().caret));
             }
