@@ -368,6 +368,10 @@ pub struct InputState {
     pub(super) selecting: bool,
     pub(super) size: Size,
     pub(super) disabled: bool,
+    /// kcode (2026-08-12): show the caret even when the input is NOT focused — the chat composer's
+    /// affordance is a slow-blinking caret in the empty box, and an unfocused empty box with no caret
+    /// reads as dead chrome. Default false (upstream behaviour).
+    pub(super) caret_always: bool,
     pub(super) masked: bool,
     pub(super) clean_on_escape: bool,
     pub(super) submit_on_enter: bool,
@@ -498,6 +502,7 @@ impl InputState {
             input_bounds: Bounds::default(),
             selecting: false,
             disabled: false,
+            caret_always: false,
             masked: false,
             clean_on_escape: false,
             submit_on_enter: false,
@@ -865,6 +870,12 @@ impl InputState {
     #[allow(unused)]
     pub(crate) fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// kcode: show the caret even unfocused (the empty composer's only affordance is its blink).
+    pub fn caret_always(mut self, caret_always: bool) -> Self {
+        self.caret_always = caret_always;
         self
     }
 
@@ -2327,7 +2338,11 @@ impl InputState {
 
     /// Returns the true to let InputElement to render cursor, when Input is focused and current BlinkCursor is visible.
     pub(crate) fn show_cursor(&self, window: &Window, cx: &App) -> bool {
-        (self.focus_handle.is_focused(window) || self.is_context_menu_open(cx))
+        // kcode: `caret_always` keeps the blink running without focus (and starts it — an unfocused
+        // input never gets the on_focus kick, so the flag starts the ticker when set).
+        (self.caret_always
+            || self.focus_handle.is_focused(window)
+            || self.is_context_menu_open(cx))
             && !self.disabled
             && self.blink_cursor.read(cx).visible()
             && window.is_window_active()

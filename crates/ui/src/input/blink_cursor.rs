@@ -68,6 +68,11 @@ impl BlinkCursor {
         });
     }
 
+    /// kcode: has the blink loop ever been started? (epoch 0 = never started or stopped.)
+    pub(crate) fn started(&self) -> bool {
+        self.epoch != 0
+    }
+
     pub fn visible(&self) -> bool {
         // Keep showing the cursor if paused
         self.paused || self.visible

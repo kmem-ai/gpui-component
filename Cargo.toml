@@ -128,3 +128,14 @@ ignored = ["log", "anyhow", "serde"]
 [patch.crates-io]
 # Use stacker's psm version which may have better WASM support
 psm = { git = "https://github.com/rust-lang/stacker", branch = "master" }
+
+# Redirect the upstream zed pins to the kmem-ai fork (rev 5b73359 = upstream 1d217ee
+# + a stable-Rust `cold_path` shim + our primitives) so this repo builds standalone on
+# the pinned stable toolchain — upstream gpui's profiler uses the unstable
+# `std::hint::cold_path` feature, which stable rejects (E0658). kcode's root manifest
+# carries the same redirect, so one gpui crate unifies across both build shapes.
+[patch."https://github.com/zed-industries/zed"]
+gpui = { git = "https://github.com/kmem-ai/zed", rev = "5b73359ec7bfa38c5d85b69d0aef5f3211d5d90a" }
+gpui_platform = { git = "https://github.com/kmem-ai/zed", rev = "5b73359ec7bfa38c5d85b69d0aef5f3211d5d90a", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { git = "https://github.com/kmem-ai/zed", rev = "5b73359ec7bfa38c5d85b69d0aef5f3211d5d90a" }
+gpui_macros = { git = "https://github.com/kmem-ai/zed", rev = "5b73359ec7bfa38c5d85b69d0aef5f3211d5d90a" }
