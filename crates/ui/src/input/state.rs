@@ -1192,6 +1192,38 @@ impl InputState {
         self.text.offset_to_position(offset)
     }
 
+    /// Whether the caret sits on the first **visual** (wrap) row of the
+    /// buffer. Wrap-aware: a single long line soft-wrapped onto several visual
+    /// rows reports `false` for a caret on any row but the first, unlike the
+    /// logical-line `cursor_position()`. Single-line inputs always report
+    /// `true`. kcode's composer uses this to decide whether ↑ recalls prompt
+    /// history (first visual row) or moves the caret up a visual line.
+    pub fn is_cursor_on_first_visual_row(&self) -> bool {
+        if self.mode.is_single_line() {
+            return true;
+        }
+        let wrap_point = self.display_map.offset_to_wrap_display_point(self.cursor());
+        let display_row = self
+            .display_map
+            .wrap_row_to_display_row(wrap_point.row)
+            .unwrap_or_else(|| self.display_map.nearest_visible_display_row(wrap_point.row));
+        display_row == 0
+    }
+
+    /// Whether the caret sits on the last **visual** (wrap) row of the buffer
+    /// — the mirror of [`Self::is_cursor_on_first_visual_row`], for ↓.
+    pub fn is_cursor_on_last_visual_row(&self) -> bool {
+        if self.mode.is_single_line() {
+            return true;
+        }
+        let wrap_point = self.display_map.offset_to_wrap_display_point(self.cursor());
+        let display_row = self
+            .display_map
+            .wrap_row_to_display_row(wrap_point.row)
+            .unwrap_or_else(|| self.display_map.nearest_visible_display_row(wrap_point.row));
+        display_row == self.display_map.display_row_count().saturating_sub(1)
+    }
+
     /// Set (0-based) [`Position`] of the cursor.
     ///
     /// This will move the cursor to the specified line and column, and update the selection range.
