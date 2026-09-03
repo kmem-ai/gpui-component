@@ -102,6 +102,53 @@ impl Render for SizedProbe {
     }
 }
 
+/// A [`MeasuredProbe`] that draws its own chrome: `show_title_bar` is off.
+///
+/// The tiles skin reserves a strip for the title bar and paints the drag bar
+/// into it; a panel that hides the bar should get neither, and only a
+/// measurement (and a drag that goes nowhere) can tell.
+pub(crate) struct TitlelessProbe {
+    focus_handle: FocusHandle,
+    height: Rc<Cell<Pixels>>,
+}
+
+impl TitlelessProbe {
+    pub(crate) fn new(height: Rc<Cell<Pixels>>, cx: &mut App) -> Entity<Self> {
+        cx.new(|cx| Self {
+            focus_handle: cx.focus_handle(),
+            height,
+        })
+    }
+}
+
+impl gpui_base::dock::Panel for TitlelessProbe {
+    fn panel_name(&self) -> &'static str {
+        "TitlelessProbe"
+    }
+}
+
+impl Panel for TitlelessProbe {
+    fn show_title_bar(&self, _: &App) -> bool {
+        false
+    }
+}
+impl EventEmitter<PanelEvent> for TitlelessProbe {}
+
+impl Focusable for TitlelessProbe {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Render for TitlelessProbe {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let height = self.height.clone();
+        div()
+            .size_full()
+            .on_prepaint(move |bounds, _, _| height.set(bounds.size.height))
+    }
+}
+
 /// A [`MeasuredProbe`] whose `visible` can be switched off.
 ///
 /// Hiding the only panel of a slot is the one edit that takes a whole slot out

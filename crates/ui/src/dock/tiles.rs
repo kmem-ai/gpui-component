@@ -195,6 +195,12 @@ impl TilesSkin {
     }
 }
 
+/// Whether the tile's panel wants the skin's title strip. A bare entity handed
+/// straight to base carries no presentation, so it gets the default strip.
+fn shows_title_bar(tile: &TileContext, cx: &App) -> bool {
+    PanelHandle::of(tile.panel()).is_none_or(|handle| handle.show_title_bar(cx))
+}
+
 impl TilesRenderer for TilesSkin {
     fn frame(&self, _: &mut Window, cx: &mut App) -> Stateful<Div> {
         div()
@@ -207,6 +213,7 @@ impl TilesRenderer for TilesSkin {
     }
 
     fn tile_frame(&self, tile: &TileContext, _: &mut Window, cx: &mut App) -> Stateful<Div> {
+        let title_bar = shows_title_bar(tile, cx);
         v_flex()
             .id(("tile", tile.panel_id().as_u64()))
             .occlude()
@@ -227,8 +234,9 @@ impl TilesRenderer for TilesSkin {
             // Room for the title bar, which is positioned over the padding so
             // the panel below it is never covered. Base draws the panel view
             // as a plain child, so this is the only way to keep the two from
-            // overlapping.
-            .pt(DRAG_BAR_HEIGHT)
+            // overlapping. A panel that hides its title bar gets the whole
+            // tile instead.
+            .when(title_bar, |this| this.pt(DRAG_BAR_HEIGHT))
             // Base installs the stored bounds on an ordinary tile and nothing
             // at all on a zoomed one — how a zoomed tile fills the dock is
             // this skin's decision.
@@ -265,6 +273,12 @@ impl TilesRenderer for TilesSkin {
     }
 
     fn render_drag_bar(&self, tile: &TileContext, window: &mut Window, cx: &mut App) -> AnyElement {
+        // A panel that draws its own chrome (`Panel::show_title_bar` off) gets
+        // no strip at all, not even a transparent one: the strip would still
+        // take the pointer over the top of the panel's own content.
+        if !shows_title_bar(tile, cx) {
+            return Empty.into_any_element();
+        }
         let node = tile.node();
         let handle = PanelHandle::of(tile.panel());
         let title_style = handle.and_then(|handle| handle.title_style(cx));
@@ -447,18 +461,33 @@ impl TilesRenderer for TilesSkin {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::{cell::Cell, sync::Arc};
 
-    use gpui::{Bounds, Entity, Half, Modifiers, TestAppContext, VisualTestContext, point, size};
-    use gpui_base::dock::{DockArea, DockLayout, PanelInfo, PanelState};
+    use gpui::{
+        Bounds, Entity, Half, Modifiers, Point, TestAppContext, VisualTestContext, point, size,
+    };
+    use gpui_base::dock::{DockArea, DockLayout, PanelInfo, PanelState, PanelView};
 
     use super::*;
-    use crate::dock::{DockSkin, panel_handle, test_support::MeasuredProbe};
+    use crate::dock::{
+        DockSkin, panel_handle,
+        test_support::{MeasuredProbe, TitlelessProbe},
+    };
 
     /// A dock area wearing `DockSkin`, with one 380×280 tile at (20, 20) in
     /// its center canvas, drawn once so its handles can be hit.
     fn one_tile_area(
         cx: &mut TestAppContext,
+    ) -> (Entity<DockArea>, Rc<DockSkin>, &mut VisualTestContext) {
+        tile_area_with(cx, |cx| {
+            panel_handle(MeasuredProbe::new(Rc::new(Cell::new(px(0.))), cx))
+        })
+    }
+
+    /// [`one_tile_area`] with the tile's panel chosen by the caller.
+    fn tile_area_with(
+        cx: &mut TestAppContext,
+        panel: impl FnOnce(&mut App) -> Arc<dyn PanelView>,
     ) -> (Entity<DockArea>, Rc<DockSkin>, &mut VisualTestContext) {
         cx.update(|cx| {
             crate::init(cx);
@@ -472,8 +501,8 @@ mod tests {
         let skin = skin_slot.expect("the skin was built inside the constructor");
 
         cx.update(|window, cx| {
-            let panel = MeasuredProbe::new(Rc::new(Cell::new(px(0.))), cx);
-            let layout = DockLayout::tiles().tile_view(panel_handle(panel), ONE_TILE, cx);
+            let panel = panel(cx);
+            let layout = DockLayout::tiles().tile_view(panel, ONE_TILE, cx);
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
@@ -499,29 +528,86 @@ mod tests {
         })
     }
 
+    /// Press at `start` and drag 40px down and to the right, drawing between
+    /// the events so each handler sees the frame the previous one produced.
+    fn drag_from(cx: &mut VisualTestContext, start: Point<Pixels>) {
+        let travel = point(px(40.), px(40.));
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        // The first move past the drag threshold starts the drag; the next
+        // one is the drag move the target acts on.
+        cx.simulate_mouse_move(
+            start + travel.map(|v| v.half()),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_move(start + travel, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_up(start + travel, MouseButton::Left, Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
     /// Press the tile's bottom-right resize corner and drag it 40px out.
     ///
     /// The corner handle hangs `HANDLE_OFFSET` past the tile's painted edge
     /// (which is one pixel past the stored bounds), so a point two pixels
     /// inside the stored corner is inside the handle.
     fn drag_the_resize_corner(cx: &mut VisualTestContext) {
-        let corner = ONE_TILE.bottom_right() - point(px(2.), px(2.));
-        let travel = point(px(40.), px(40.));
-        cx.simulate_mouse_down(corner, MouseButton::Left, Modifiers::default());
-        cx.update(|window, cx| window.draw(cx).clear(cx));
-        // The first move past the drag threshold starts the drag; the next
-        // one is the drag move the handle resizes on.
-        cx.simulate_mouse_move(
-            corner + travel.map(|v| v.half()),
-            MouseButton::Left,
-            Modifiers::default(),
+        drag_from(cx, ONE_TILE.bottom_right() - point(px(2.), px(2.)));
+    }
+
+    /// Press inside the tile's top strip, where the skin's drag bar sits, and
+    /// drag 40px.
+    fn drag_the_title_strip(cx: &mut VisualTestContext) {
+        drag_from(cx, ONE_TILE.origin + point(px(100.), px(10.)));
+    }
+
+    /// The control for the hidden-title-bar tests below: a panel that keeps
+    /// its title bar is moved by a drag on that strip.
+    #[gpui::test]
+    fn should_move_a_tile_dragged_by_its_title_strip(cx: &mut TestAppContext) {
+        let (area, _skin, cx) = one_tile_area(cx);
+        drag_the_title_strip(cx);
+        let moved = first_tile_bounds(&area, cx);
+        assert!(
+            moved.origin.x > ONE_TILE.origin.x && moved.origin.y > ONE_TILE.origin.y,
+            "the title strip drag must move the tile; it is at {:?}",
+            moved.origin
         );
-        cx.update(|window, cx| window.draw(cx).clear(cx));
-        cx.simulate_mouse_move(corner + travel, MouseButton::Left, Modifiers::default());
-        cx.update(|window, cx| window.draw(cx).clear(cx));
-        cx.simulate_mouse_up(corner + travel, MouseButton::Left, Modifiers::default());
-        cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    /// `Panel::show_title_bar` off means no strip at all, so the same drag has
+    /// nothing to grab and the tile stays put.
+    #[gpui::test]
+    fn should_leave_a_tile_alone_when_its_panel_hides_the_title_strip(cx: &mut TestAppContext) {
+        let (area, _skin, cx) = tile_area_with(cx, |cx| {
+            panel_handle(TitlelessProbe::new(Rc::new(Cell::new(px(0.))), cx))
+        });
+        drag_the_title_strip(cx);
+        assert_eq!(
+            first_tile_bounds(&area, cx),
+            ONE_TILE,
+            "with no title strip, a drag across the tile's top must leave its bounds alone"
+        );
+    }
+
+    /// The strip's room goes to the panel too: it gets the whole tile, not
+    /// the part below a title bar it does not show.
+    #[gpui::test]
+    fn should_give_a_panel_that_hides_its_title_bar_the_whole_tile(cx: &mut TestAppContext) {
+        let height = Rc::new(Cell::new(px(0.)));
+        let measured = height.clone();
+        let (_area, _skin, _cx) = tile_area_with(cx, move |cx| {
+            panel_handle(TitlelessProbe::new(measured, cx))
+        });
+        let panel_height = height.get();
+        assert!(
+            panel_height > ONE_TILE.size.height - DRAG_BAR_HEIGHT,
+            "the panel should get the tile minus its border, not minus a title strip; \
+             it got {panel_height:?}"
+        );
     }
 
     /// The control for the gate test below: with handles on (the default),
