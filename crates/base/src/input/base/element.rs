@@ -46,6 +46,15 @@ fn diagnostic_highlight_style(
     }
 }
 
+/// The row height the input lays out and paints with: the authored line height, but never
+/// shorter than the resolved font's own box (1.25×) — a consumer that enlarges the input's
+/// font (a reading-tier composer) grows the rows with it instead of clipping taller glyphs
+/// into default-size rows.
+pub(crate) fn row_line_height(window: &Window) -> Pixels {
+    let font_px = window.text_style().font_size.to_pixels(window.rem_size());
+    window.line_height().max(font_px * 1.25)
+}
+
 const BOTTOM_MARGIN_ROWS: usize = 3;
 pub(super) const RIGHT_MARGIN: Pixels = px(10.);
 pub(super) const LINE_NUMBER_RIGHT_MARGIN: Pixels = px(10.);
@@ -1682,7 +1691,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let state = self.state.read(cx);
-        let line_height = window.line_height();
+        let line_height = row_line_height(window);
 
         let mut style = Style::default();
         style.size.width = relative(1.).into();
@@ -1778,7 +1787,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
         }
 
         let state = self.state.read(cx);
-        let line_height = window.line_height();
+        let line_height = row_line_height(window);
 
         let (visible_range, visible_buffer_lines, visible_top) =
             self.calculate_visible_range(&state, line_height, bounds.size.height);
@@ -2136,7 +2145,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
         );
 
         // Paint multi line text
-        let line_height = window.line_height();
+        let line_height = row_line_height(window);
         let origin = bounds.origin;
 
         let invisible_top_padding = prepaint.last_layout.visible_top;
@@ -3284,5 +3293,50 @@ mod tests {
             cursor_surrounding_padding(false, None, visible_lines, line_height),
             raw.min(half),
         );
+    }
+
+    /// The authored line height is rem-relative, so a bigger font would otherwise be clipped
+    /// into rows sized for the default font.
+    #[gpui::test]
+    fn should_grow_the_row_height_with_the_resolved_font_size(cx: &mut gpui::TestAppContext) {
+        use gpui::{TextStyleRefinement, rems};
+        let cx = cx.add_empty_window();
+        cx.update(|window, _| {
+            let style = TextStyleRefinement {
+                font_size: Some(px(36.).into()),
+                line_height: Some(rems(1.25).into()),
+                ..Default::default()
+            };
+            window.with_text_style(Some(style), |window| {
+                assert_eq!(window.line_height(), px(20.), "the authored row is 1.25rem");
+                assert_eq!(
+                    row_line_height(window),
+                    px(45.),
+                    "a 36px font needs a 45px row"
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_keep_the_authored_line_height_when_it_is_taller_than_the_font_box(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use gpui::{TextStyleRefinement, rems};
+        let cx = cx.add_empty_window();
+        cx.update(|window, _| {
+            let style = TextStyleRefinement {
+                font_size: Some(px(12.).into()),
+                line_height: Some(rems(1.25).into()),
+                ..Default::default()
+            };
+            window.with_text_style(Some(style), |window| {
+                assert_eq!(
+                    row_line_height(window),
+                    px(20.),
+                    "a 12px font fits the 20px row"
+                );
+            });
+        });
     }
 }
