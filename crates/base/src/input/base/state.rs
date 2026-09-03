@@ -5053,6 +5053,164 @@ mod tests {
             .input
             .read_with(&mut editor_cx, |state, _| assert!(state.soft_wrap));
     }
+
+    #[gpui::test]
+    fn should_delete_the_range_and_leave_the_cursor_at_its_start(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build_textarea(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("hello world", window, cx);
+                state.delete_range(0..6, window, cx);
+                assert_eq!(state.value(), "world");
+                assert_eq!(state.cursor(), 0);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_delete_through_a_disabled_input_and_clamp_the_range(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build_textarea(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("hello world", window, cx);
+                state.set_disabled(true, cx);
+                state.delete_range(6..99, window, cx);
+                assert_eq!(state.value(), "hello ", "the end is clamped to the text");
+                assert!(state.disabled, "the disabled flag is restored afterwards");
+                state.delete_range(3..3, window, cx);
+                assert_eq!(state.value(), "hello ", "an empty range is a no-op");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_move_the_cursor_to_an_offset_without_a_selection(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build_textarea(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("hello world", window, cx);
+                state.move_cursor_to(5, cx);
+                assert_eq!(state.cursor(), 5);
+                assert!(state.selected_range.is_empty());
+                state.move_cursor_to(99, cx);
+                assert_eq!(state.cursor(), 11, "clamped to the text length");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_undo_and_redo_the_last_edit_through_the_public_wrappers(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build_textarea(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("hello world", window, cx);
+                state.delete_range(0..6, window, cx);
+                assert_eq!(state.value(), "world");
+                state.set_disabled(true, cx);
+                state.undo_last(window, cx);
+                assert_eq!(state.value(), "hello world", "undo lands while disabled");
+                state.redo_last(window, cx);
+                assert_eq!(state.value(), "world", "redo lands while disabled");
+                assert!(state.disabled, "the disabled flag is restored afterwards");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_show_the_caret_unfocused_when_caret_always_is_set(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build(cx, |state| state.caret_always(true));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        // The test platform delivers activation on its next executor turn, so
+        // park before painting; the first paint starts the blink ticker.
+        // Nothing focuses the input.
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                assert!(!state.focus_handle.is_focused(window));
+                assert!(state.show_cursor(window, cx));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_hide_the_caret_unfocused_by_default(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                assert!(!state.focus_handle.is_focused(window));
+                assert!(!state.show_cursor(window, cx));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_report_the_visual_row_the_caret_is_on(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build_textarea(cx, |state| state.default_value("a\nb\nc"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        // A layout pass fills the display map the row queries read.
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                state.move_cursor_to(0, cx);
+                assert!(state.is_cursor_on_first_visual_row());
+                assert!(!state.is_cursor_on_last_visual_row());
+                state.move_cursor_to(2, cx);
+                assert!(!state.is_cursor_on_first_visual_row());
+                assert!(!state.is_cursor_on_last_visual_row());
+                state.move_cursor_to(5, cx);
+                assert!(!state.is_cursor_on_first_visual_row());
+                assert!(state.is_cursor_on_last_visual_row());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_treat_a_single_line_input_as_both_first_and_last_row(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build(cx, |state| state.default_value("abc"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                state.move_cursor_to(1, cx);
+                assert!(state.is_cursor_on_first_visual_row());
+                assert!(state.is_cursor_on_last_visual_row());
+            });
+        });
+    }
 }
 
 /// Methods that only a single-line input offers.
@@ -5427,163 +5585,5 @@ impl InputBaseState<crate::input::EditorMode> {
             *l = line_number;
         }
         cx.notify();
-    }
-
-    #[gpui::test]
-    fn should_delete_the_range_and_leave_the_cursor_at_its_start(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let input_view = InputView::build_textarea(cx, |state| state);
-        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
-        let input = input_view.input;
-
-        cx.update(|window, cx| {
-            input.update(cx, |state, cx| {
-                state.set_value("hello world", window, cx);
-                state.delete_range(0..6, window, cx);
-                assert_eq!(state.value(), "world");
-                assert_eq!(state.cursor(), 0);
-            });
-        });
-    }
-
-    #[gpui::test]
-    fn should_delete_through_a_disabled_input_and_clamp_the_range(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let input_view = InputView::build_textarea(cx, |state| state);
-        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
-        let input = input_view.input;
-
-        cx.update(|window, cx| {
-            input.update(cx, |state, cx| {
-                state.set_value("hello world", window, cx);
-                state.set_disabled(true, cx);
-                state.delete_range(6..99, window, cx);
-                assert_eq!(state.value(), "hello ", "the end is clamped to the text");
-                assert!(state.disabled, "the disabled flag is restored afterwards");
-                state.delete_range(3..3, window, cx);
-                assert_eq!(state.value(), "hello ", "an empty range is a no-op");
-            });
-        });
-    }
-
-    #[gpui::test]
-    fn should_move_the_cursor_to_an_offset_without_a_selection(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let input_view = InputView::build_textarea(cx, |state| state);
-        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
-        let input = input_view.input;
-
-        cx.update(|window, cx| {
-            input.update(cx, |state, cx| {
-                state.set_value("hello world", window, cx);
-                state.move_cursor_to(5, cx);
-                assert_eq!(state.cursor(), 5);
-                assert!(state.selected_range.is_empty());
-                state.move_cursor_to(99, cx);
-                assert_eq!(state.cursor(), 11, "clamped to the text length");
-            });
-        });
-    }
-
-    #[gpui::test]
-    fn should_undo_and_redo_the_last_edit_through_the_public_wrappers(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let input_view = InputView::build_textarea(cx, |state| state);
-        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
-        let input = input_view.input;
-
-        cx.update(|window, cx| {
-            input.update(cx, |state, cx| {
-                state.set_value("hello world", window, cx);
-                state.delete_range(0..6, window, cx);
-                assert_eq!(state.value(), "world");
-                state.set_disabled(true, cx);
-                state.undo_last(window, cx);
-                assert_eq!(state.value(), "hello world", "undo lands while disabled");
-                state.redo_last(window, cx);
-                assert_eq!(state.value(), "world", "redo lands while disabled");
-                assert!(state.disabled, "the disabled flag is restored afterwards");
-            });
-        });
-    }
-
-    #[gpui::test]
-    fn should_show_the_caret_unfocused_when_caret_always_is_set(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let input_view = InputView::build(cx, |state| state.caret_always(true));
-        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
-        let input = input_view.input;
-
-        // The first paint starts the blink ticker; nothing focuses the input.
-        cx.update(|window, cx| {
-            window.activate_window();
-            window.draw(cx).clear(cx);
-        });
-        cx.update(|window, cx| {
-            input.update(cx, |state, cx| {
-                assert!(!state.focus_handle.is_focused(window));
-                assert!(state.show_cursor(window, cx));
-            });
-        });
-    }
-
-    #[gpui::test]
-    fn should_hide_the_caret_unfocused_by_default(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let input_view = InputView::build(cx, |state| state);
-        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
-        let input = input_view.input;
-
-        cx.update(|window, cx| {
-            window.activate_window();
-            window.draw(cx).clear(cx);
-        });
-        cx.update(|window, cx| {
-            input.update(cx, |state, cx| {
-                assert!(!state.focus_handle.is_focused(window));
-                assert!(!state.show_cursor(window, cx));
-            });
-        });
-    }
-
-    #[gpui::test]
-    fn should_report_the_visual_row_the_caret_is_on(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let input_view = InputView::build_textarea(cx, |state| state.default_value("a\nb\nc"));
-        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
-        let input = input_view.input;
-
-        // A layout pass fills the display map the row queries read.
-        cx.update(|window, cx| window.draw(cx).clear(cx));
-        cx.update(|_, cx| {
-            input.update(cx, |state, cx| {
-                state.move_cursor_to(0, cx);
-                assert!(state.is_cursor_on_first_visual_row());
-                assert!(!state.is_cursor_on_last_visual_row());
-                state.move_cursor_to(2, cx);
-                assert!(!state.is_cursor_on_first_visual_row());
-                assert!(!state.is_cursor_on_last_visual_row());
-                state.move_cursor_to(5, cx);
-                assert!(!state.is_cursor_on_first_visual_row());
-                assert!(state.is_cursor_on_last_visual_row());
-            });
-        });
-    }
-
-    #[gpui::test]
-    fn should_treat_a_single_line_input_as_both_first_and_last_row(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let input_view = InputView::build(cx, |state| state.default_value("abc"));
-        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
-        let input = input_view.input;
-
-        cx.update(|window, cx| window.draw(cx).clear(cx));
-        cx.update(|_, cx| {
-            input.update(cx, |state, cx| {
-                state.move_cursor_to(1, cx);
-                assert!(state.is_cursor_on_first_visual_row());
-                assert!(state.is_cursor_on_last_visual_row());
-            });
-        });
     }
 }

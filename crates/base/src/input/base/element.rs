@@ -3313,48 +3313,47 @@ mod tests {
         );
     }
 
+    /// Draws a text-styled div whose child reads the row height during prepaint,
+    /// because `Window::text_style` is only readable while drawing.
+    fn measure_row_height(cx: &mut gpui::TestAppContext, font_size: Pixels) -> Pixels {
+        use std::{cell::Cell, rc::Rc};
+
+        use gpui::{ParentElement, Styled, canvas, div, point, rems, size};
+
+        let cx = cx.add_empty_window();
+        let measured = Rc::new(Cell::new(px(0.)));
+        let slot = measured.clone();
+        cx.draw(point(px(0.), px(0.)), size(px(400.), px(300.)), |_, _| {
+            div()
+                .text_size(font_size)
+                .line_height(rems(1.25))
+                .child(canvas(
+                    move |_, window, _| slot.set(row_line_height(window)),
+                    |_, _, _, _| {},
+                ))
+        });
+        measured.get()
+    }
+
     /// The authored line height is rem-relative, so a bigger font would otherwise be clipped
     /// into rows sized for the default font.
     #[gpui::test]
     fn should_grow_the_row_height_with_the_resolved_font_size(cx: &mut gpui::TestAppContext) {
-        use gpui::{TextStyleRefinement, rems};
-        let cx = cx.add_empty_window();
-        cx.update(|window, _| {
-            let style = TextStyleRefinement {
-                font_size: Some(px(36.).into()),
-                line_height: Some(rems(1.25).into()),
-                ..Default::default()
-            };
-            window.with_text_style(Some(style), |window| {
-                assert_eq!(window.line_height(), px(20.), "the authored row is 1.25rem");
-                assert_eq!(
-                    row_line_height(window),
-                    px(45.),
-                    "a 36px font needs a 45px row"
-                );
-            });
-        });
+        assert_eq!(
+            measure_row_height(cx, px(36.)),
+            px(45.),
+            "a 36px font needs a 45px row, not the authored 1.25rem (20px)"
+        );
     }
 
     #[gpui::test]
     fn should_keep_the_authored_line_height_when_it_is_taller_than_the_font_box(
         cx: &mut gpui::TestAppContext,
     ) {
-        use gpui::{TextStyleRefinement, rems};
-        let cx = cx.add_empty_window();
-        cx.update(|window, _| {
-            let style = TextStyleRefinement {
-                font_size: Some(px(12.).into()),
-                line_height: Some(rems(1.25).into()),
-                ..Default::default()
-            };
-            window.with_text_style(Some(style), |window| {
-                assert_eq!(
-                    row_line_height(window),
-                    px(20.),
-                    "a 12px font fits the 20px row"
-                );
-            });
-        });
+        assert_eq!(
+            measure_row_height(cx, px(12.)),
+            px(20.),
+            "a 12px font fits the authored 20px row"
+        );
     }
 }

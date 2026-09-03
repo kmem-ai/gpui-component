@@ -449,7 +449,7 @@ impl TilesRenderer for TilesSkin {
 mod tests {
     use std::cell::Cell;
 
-    use gpui::{Bounds, Entity, Modifiers, TestAppContext, VisualTestContext, point, size};
+    use gpui::{Bounds, Entity, Half, Modifiers, TestAppContext, VisualTestContext, point, size};
     use gpui_base::dock::{DockArea, DockLayout, PanelInfo, PanelState};
 
     use super::*;
