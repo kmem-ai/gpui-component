@@ -2130,6 +2130,41 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
     }
 
+    /// Whether the caret sits on the first **visual** (wrap) row of the
+    /// buffer. Wrap-aware: a single long line soft-wrapped onto several visual
+    /// rows reports `false` for a caret on any row but the first, unlike the
+    /// logical-line `cursor_position()`. Single-line inputs always report
+    /// `true`. kcode's composer uses this to decide whether ↑ recalls prompt
+    /// history (first visual row) or moves the caret up a visual line.
+    pub fn is_cursor_on_first_visual_row(&self) -> bool {
+        if self.is_single_line() {
+            return true;
+        }
+        self.cursor_display_row() == 0
+    }
+
+    /// Whether the caret sits on the last **visual** (wrap) row of the buffer
+    /// — the mirror of [`Self::is_cursor_on_first_visual_row`], for ↓.
+    pub fn is_cursor_on_last_visual_row(&self) -> bool {
+        if self.is_single_line() {
+            return true;
+        }
+        self.cursor_display_row() == self.display_map.display_row_count().saturating_sub(1)
+    }
+
+    /// The display row the caret is drawn on: wrap-aware, honouring the caret's
+    /// line-end affinity, folded rows skipped — the same row `move_vertical`
+    /// starts from.
+    fn cursor_display_row(&self) -> usize {
+        let wrap_point = self.display_map.offset_to_wrap_display_point_with_affinity(
+            self.cursor(),
+            self.cursor_line_end_affinity,
+        );
+        self.display_map
+            .wrap_row_to_display_row(wrap_point.row)
+            .unwrap_or_else(|| self.display_map.nearest_visible_display_row(wrap_point.row))
+    }
+
     /// Visible row range in the last laid-out viewport, `None` before first layout.
     pub fn visible_row_range(&self) -> Option<std::ops::Range<usize>> {
         self.last_layout.as_ref().map(|l| l.visible_range.clone())
@@ -5507,6 +5542,47 @@ impl InputBaseState<crate::input::EditorMode> {
             input.update(cx, |state, cx| {
                 assert!(!state.focus_handle.is_focused(window));
                 assert!(!state.show_cursor(window, cx));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_report_the_visual_row_the_caret_is_on(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build_textarea(cx, |state| state.default_value("a\nb\nc"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        // A layout pass fills the display map the row queries read.
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                state.move_cursor_to(0, cx);
+                assert!(state.is_cursor_on_first_visual_row());
+                assert!(!state.is_cursor_on_last_visual_row());
+                state.move_cursor_to(2, cx);
+                assert!(!state.is_cursor_on_first_visual_row());
+                assert!(!state.is_cursor_on_last_visual_row());
+                state.move_cursor_to(5, cx);
+                assert!(!state.is_cursor_on_first_visual_row());
+                assert!(state.is_cursor_on_last_visual_row());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_treat_a_single_line_input_as_both_first_and_last_row(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build(cx, |state| state.default_value("abc"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                state.move_cursor_to(1, cx);
+                assert!(state.is_cursor_on_first_visual_row());
+                assert!(state.is_cursor_on_last_visual_row());
             });
         });
     }
