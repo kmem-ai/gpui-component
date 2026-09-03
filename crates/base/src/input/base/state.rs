@@ -1500,6 +1500,35 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.pause_blink_cursor(cx);
     }
 
+    /// Delete an absolute UTF-8 byte range, leaving the cursor at its start.
+    ///
+    /// The public operator primitive for host-side modal editors (kcode's
+    /// composer vim mode — `x`/`dd`/`D`/`cc`): the host computes the span
+    /// and drives the deletion here so history (undo) and the change event
+    /// behave exactly like a built-in deletion. A no-op on an empty or
+    /// out-of-bounds range.
+    pub fn delete_range(
+        &mut self,
+        range: std::ops::Range<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let start = range.start.min(self.text.len());
+        let end = range.end.min(self.text.len());
+        if start >= end {
+            return;
+        }
+        // Like `insert`/`replace`: an explicit host-driven edit lands even while
+        // the input is disabled (a modal editor's NORMAL mode renders the input
+        // disabled precisely so *keyboard* edits stop reaching it).
+        self.with_edits_allowed(|this| {
+            this.undo_manager.pending_intent = Some(EditIntent::Atomic);
+            this.selected_range = (start..end).into();
+            this.replace_text_in_range(None, "", window, cx);
+            this.pause_blink_cursor(cx);
+        });
+    }
+
     pub(super) fn delete_to_beginning_of_line(
         &mut self,
         _: &DeleteToBeginningOfLine,
@@ -5334,5 +5363,61 @@ impl InputBaseState<crate::input::EditorMode> {
             *l = line_number;
         }
         cx.notify();
+    }
+
+    #[gpui::test]
+    fn should_delete_the_range_and_leave_the_cursor_at_its_start(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build_textarea(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("hello world", window, cx);
+                state.delete_range(0..6, window, cx);
+                assert_eq!(state.value(), "world");
+                assert_eq!(state.cursor(), 0);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_delete_through_a_disabled_input_and_clamp_the_range(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build_textarea(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("hello world", window, cx);
+                state.set_disabled(true, cx);
+                state.delete_range(6..99, window, cx);
+                assert_eq!(state.value(), "hello ", "the end is clamped to the text");
+                assert!(state.disabled, "the disabled flag is restored afterwards");
+                state.delete_range(3..3, window, cx);
+                assert_eq!(state.value(), "hello ", "an empty range is a no-op");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_move_the_cursor_to_an_offset_without_a_selection(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build_textarea(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("hello world", window, cx);
+                state.move_cursor_to(5, cx);
+                assert_eq!(state.cursor(), 5);
+                assert!(state.selected_range.is_empty());
+                state.move_cursor_to(99, cx);
+                assert_eq!(state.cursor(), 11, "clamped to the text length");
+            });
+        });
     }
 }

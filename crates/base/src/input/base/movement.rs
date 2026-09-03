@@ -50,6 +50,16 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.move_to_with_affinity(offset, direction, false, cx);
     }
 
+    /// Move the cursor to an absolute UTF-8 byte offset with no selection.
+    ///
+    /// The public wrapper over the internal `move_to`, for host-side modal
+    /// editors layered on the input (kcode's composer vim mode): the host
+    /// computes motion offsets itself (word spans, find-char targets) and
+    /// drives the cursor here. Clamped to the text length.
+    pub fn move_cursor_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.move_to(offset, None, cx);
+    }
+
     /// Like [`Self::move_to`], but also carries the caret's line-end affinity.
     ///
     /// A soft wrap boundary is one offset shared by the end of one visual line and the start of
