@@ -315,6 +315,11 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) last_selected_range: Option<Selection>,
     pub(super) selecting: bool,
     pub(crate) disabled: bool,
+    /// Show the caret even when the input is NOT focused — kcode's chat composer
+    /// (2026-08-12): the empty box's affordance is a slow-blinking caret, and an
+    /// unfocused empty box with no caret reads as dead chrome. Default false
+    /// (upstream behaviour).
+    pub(crate) caret_always: bool,
     pub(crate) readonly: bool,
     pub(crate) text_align: TextAlign,
     pub(super) masked: bool,
@@ -632,6 +637,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             input_bounds: Bounds::default(),
             selecting: false,
             disabled: false,
+            caret_always: false,
             readonly: false,
             text_align: TextAlign::Left,
             masked: false,
@@ -2399,7 +2405,12 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Returns the true to let InputElement to render cursor, when Input is focused and current BlinkCursor is visible.
     pub(crate) fn show_cursor(&self, window: &Window, cx: &App) -> bool {
-        (self.focus_handle.is_focused(window) || M::is_context_menu_open(self, cx))
+        // `caret_always` stands in for the focus/context-menu condition — the empty
+        // composer's only affordance is its blink, so it keeps running unfocused.
+        // `disabled` and an inactive window still hide the caret.
+        (self.caret_always
+            || self.focus_handle.is_focused(window)
+            || M::is_context_menu_open(self, cx))
             && !self.disabled
             && self.blink_cursor.read(cx).visible()
             && window.is_window_active()
@@ -5047,6 +5058,12 @@ impl InputBaseState<crate::input::InputMode> {
         cx.notify();
     }
 
+    /// Show the caret even unfocused (the empty composer's only affordance is its blink).
+    pub fn caret_always(mut self, caret_always: bool) -> Self {
+        self.caret_always = caret_always;
+        self
+    }
+
     /// Set the regular expression pattern of the input field.
     pub fn pattern(mut self, pattern: regex::Regex) -> Self {
         self.pattern = Some(pattern);
@@ -5451,6 +5468,45 @@ impl InputBaseState<crate::input::EditorMode> {
                 state.redo_last(window, cx);
                 assert_eq!(state.value(), "world", "redo lands while disabled");
                 assert!(state.disabled, "the disabled flag is restored afterwards");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_show_the_caret_unfocused_when_caret_always_is_set(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build(cx, |state| state.caret_always(true));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        // The first paint starts the blink ticker; nothing focuses the input.
+        cx.update(|window, cx| {
+            window.activate_window();
+            window.draw(cx).clear(cx);
+        });
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                assert!(!state.focus_handle.is_focused(window));
+                assert!(state.show_cursor(window, cx));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_hide_the_caret_unfocused_by_default(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            window.activate_window();
+            window.draw(cx).clear(cx);
+        });
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                assert!(!state.focus_handle.is_focused(window));
+                assert!(!state.show_cursor(window, cx));
             });
         });
     }

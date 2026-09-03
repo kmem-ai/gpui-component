@@ -44,6 +44,11 @@ impl BlinkCursor {
         cx.notify();
     }
 
+    /// Has the blink loop ever been started? (epoch 0 = never started, or stopped.)
+    pub(crate) fn started(&self) -> bool {
+        self.epoch != 0
+    }
+
     fn next_epoch(&mut self) -> usize {
         self.epoch += 1;
         self.epoch

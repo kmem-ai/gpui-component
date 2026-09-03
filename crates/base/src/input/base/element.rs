@@ -2123,11 +2123,28 @@ impl<M: InputModeKind> Element for TextElement<M> {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let (focus_handle, show_cursor, disabled, selected_range, editor_style, editor_paddings) = {
+        // An always-on caret never gets the on_focus kick — start its blink ticker on
+        // the first paint instead (gated on `started`, so this runs exactly once).
+        if self.state.read(cx).caret_always {
+            let blink = self.state.read(cx).blink_cursor.clone();
+            if !blink.read(cx).started() {
+                blink.update(cx, |blink, cx| blink.start(cx));
+            }
+        }
+        let (
+            focus_handle,
+            show_cursor,
+            caret_always,
+            disabled,
+            selected_range,
+            editor_style,
+            editor_paddings,
+        ) = {
             let state = self.state.read(cx);
             (
                 state.focus_handle.clone(),
                 state.show_cursor(window, cx),
+                state.caret_always,
                 state.disabled,
                 state.selected_range,
                 state.editor_style.clone(),
@@ -2331,8 +2348,9 @@ impl<M: InputModeKind> Element for TextElement<M> {
             }
         }
 
-        // Paint blinking cursor
-        if focused && show_cursor {
+        // Paint blinking cursor. `caret_always` paints without focus — `show_cursor` already
+        // folded the flag into its condition, so here it just widens the same gate.
+        if (focused || caret_always) && show_cursor {
             if let Some(cursor_bounds) = prepaint.cursor_bounds_with_scroll() {
                 window.paint_quad(fill(cursor_bounds, editor_style.caret));
             }

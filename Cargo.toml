@@ -153,3 +153,17 @@ consts = "consts"
 
 [workspace.metadata.cargo-machete]
 ignored = ["log", "anyhow", "serde"]
+
+# Redirect the upstream zed sources to the kmem-ai fork: rev 88d396aa = upstream f66ed399
+# (the rev this tree's Cargo.lock locks) + our gpui primitives (BGRA surface paint, view
+# capture, backdrop blur, shader pass, drag threshold, ⌘. phantom-Escape swallow, image
+# release). Every zed-sourced workspace dependency is redirected, so the transitive zed
+# crates resolve from one checkout. kcode's root manifest carries the same redirect, so one
+# gpui crate unifies across both build shapes.
+[patch."https://github.com/zed-industries/zed"]
+# `version` disambiguates from the lint test fixture also named `gpui` in the zed tree.
+gpui = { version = "=0.2.2", git = "https://github.com/kmem-ai/zed", rev = "88d396aa1d11c9f51149de89b59860b846110dc5" }
+gpui_platform = { git = "https://github.com/kmem-ai/zed", rev = "88d396aa1d11c9f51149de89b59860b846110dc5" }
+gpui_web = { git = "https://github.com/kmem-ai/zed", rev = "88d396aa1d11c9f51149de89b59860b846110dc5" }
+gpui_macros = { git = "https://github.com/kmem-ai/zed", rev = "88d396aa1d11c9f51149de89b59860b846110dc5" }
+reqwest_client = { git = "https://github.com/kmem-ai/zed", rev = "88d396aa1d11c9f51149de89b59860b846110dc5" }
