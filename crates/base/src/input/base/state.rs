@@ -1529,6 +1529,18 @@ impl<M: InputModeKind> InputBaseState<M> {
         });
     }
 
+    /// Undo one history step (the public wrapper for host-side modal
+    /// editors — kcode's composer vim mode `u`). Behaves exactly like the
+    /// input's own `Undo` action, including while the input is disabled.
+    pub fn undo_last(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.with_edits_allowed(|this| this.undo(&Undo, window, cx));
+    }
+
+    /// Redo one history step (kcode's composer vim mode `ctrl-r`).
+    pub fn redo_last(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.with_edits_allowed(|this| this.redo(&Redo, window, cx));
+    }
+
     pub(super) fn delete_to_beginning_of_line(
         &mut self,
         _: &DeleteToBeginningOfLine,
@@ -5417,6 +5429,28 @@ impl InputBaseState<crate::input::EditorMode> {
                 assert!(state.selected_range.is_empty());
                 state.move_cursor_to(99, cx);
                 assert_eq!(state.cursor(), 11, "clamped to the text length");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn should_undo_and_redo_the_last_edit_through_the_public_wrappers(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build_textarea(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("hello world", window, cx);
+                state.delete_range(0..6, window, cx);
+                assert_eq!(state.value(), "world");
+                state.set_disabled(true, cx);
+                state.undo_last(window, cx);
+                assert_eq!(state.value(), "hello world", "undo lands while disabled");
+                state.redo_last(window, cx);
+                assert_eq!(state.value(), "world", "redo lands while disabled");
+                assert!(state.disabled, "the disabled flag is restored afterwards");
             });
         });
     }
