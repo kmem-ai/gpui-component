@@ -613,6 +613,10 @@ pub struct ThemeConfigColors {
     /// Background color for Tiles.
     #[serde(rename = "tiles.background")]
     pub tiles: Option<SharedString>,
+    /// Background color for the dock area's split containers (the gutters between panes and
+    /// what shows behind a tiles canvas). Falls back to `tab_bar.background`.
+    #[serde(rename = "dock.background")]
+    pub dock: Option<SharedString>,
     /// Warning background color.
     #[serde(rename = "warning.background")]
     pub warning: Option<SharedString>,
@@ -1013,6 +1017,7 @@ impl ThemeColor {
         apply_background_color!(status_bar, fallback = tokens.title_bar);
         apply_color!(status_bar_border, fallback = self.title_bar_border);
         apply_background_color!(tiles, fallback = tokens.background);
+        apply_background_color!(dock, fallback = tokens.tab_bar);
         apply_background_color!(overlay);
         apply_color!(window_border, fallback = self.border);
 
@@ -1227,6 +1232,52 @@ mod tests {
             )
         );
         assert_eq!(theme.mode, ThemeMode::Light);
+    }
+
+    /// A theme that says nothing about the dock's split fill keeps the fill
+    /// those containers always had: the tab bar's.
+    #[test]
+    fn test_dock_background_falls_back_to_the_tab_bar() {
+        let config = serde_json::from_value::<ThemeConfig>(serde_json::json!({
+            "name": "Dock fallback",
+            "mode": "dark",
+            "colors": { "tab_bar.background": "#123456" }
+        }))
+        .unwrap();
+
+        let mut theme = Theme::default();
+        theme.apply_config(&std::rc::Rc::new(config));
+
+        let tab_bar = try_parse_color("#123456").unwrap();
+        assert_eq!(theme.tokens.tab_bar.color, tab_bar);
+        assert_eq!(theme.dock, tab_bar);
+        assert_eq!(theme.tokens.dock.color, tab_bar);
+        assert_eq!(
+            theme.tokens.dock.background,
+            theme.tokens.tab_bar.background
+        );
+    }
+
+    /// `dock.background` is its own token, so a consumer can make the dock's
+    /// split containers see-through without touching the tab bar.
+    #[test]
+    fn test_dock_background_can_be_transparent_while_the_tab_bar_is_not() {
+        let config = serde_json::from_value::<ThemeConfig>(serde_json::json!({
+            "name": "See-through dock",
+            "mode": "dark",
+            "colors": {
+                "tab_bar.background": "#123456",
+                "dock.background": "#00000000"
+            }
+        }))
+        .unwrap();
+
+        let mut theme = Theme::default();
+        theme.apply_config(&std::rc::Rc::new(config));
+
+        assert_eq!(theme.tokens.dock.color.a, 0.);
+        assert_eq!(theme.dock.a, 0.);
+        assert_ne!(theme.tokens.tab_bar.color.a, 0.);
     }
 
     #[test]

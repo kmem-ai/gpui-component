@@ -90,6 +90,13 @@ pub(crate) struct SkinShared {
     /// sizing every tile) turns them off, so no tile shows a resize affordance it
     /// cannot honour.
     tiles_resizable: Cell<bool>,
+    /// Whether each tile wears the skin's own frame chrome — the 1px `border`
+    /// hairline with the `tile_radius` rounding. `true` by default. A consumer
+    /// whose panels paint their own edge (a translucent card with its own
+    /// hairline and radius) turns it off, so no tile carries two borders and a
+    /// tile at the canvas origin shows no stray edge; the panel then gets the
+    /// whole stored bounds.
+    tiles_bordered: Cell<bool>,
     /// The dock whose resize handle is being dragged, if any. Only one can be.
     resizing_dock: Cell<Option<DockPlacement>>,
 }
@@ -113,6 +120,10 @@ impl SkinShared {
 
     pub(crate) fn tiles_resizable(&self) -> bool {
         self.tiles_resizable.get()
+    }
+
+    pub(crate) fn tiles_bordered(&self) -> bool {
+        self.tiles_bordered.get()
     }
 
     pub(crate) fn resizing_dock(&self) -> &Cell<Option<DockPlacement>> {
@@ -175,6 +186,7 @@ impl DockSkin {
                 toggle_button_visible: Cell::new(true),
                 tiles_scrollbar_mode: Cell::new(None),
                 tiles_resizable: Cell::new(true),
+                tiles_bordered: Cell::new(true),
                 resizing_dock: Cell::new(None),
             }),
         })
@@ -226,6 +238,22 @@ impl DockSkin {
     /// show no resize corner/edge handles the layout would immediately undo.
     pub fn set_tiles_resizable(&self, resizable: bool, cx: &mut App) {
         self.shared.tiles_resizable.set(resizable);
+        self.shared.notify(cx);
+    }
+
+    /// Whether tiles wear the skin's own frame chrome (the 1px border and the
+    /// tile radius). Defaults to `true`.
+    pub fn tiles_bordered(&self) -> bool {
+        self.shared.tiles_bordered()
+    }
+
+    /// Enable or disable the skin's per-tile frame chrome for every tile in
+    /// every tiles canvas of this area. Set `false` when the panels paint their
+    /// own edge, so a tile carries one border rather than two and a tile at the
+    /// canvas origin shows no stray hairline; each panel then gets its whole
+    /// stored bounds.
+    pub fn set_tiles_bordered(&self, bordered: bool, cx: &mut App) {
+        self.shared.tiles_bordered.set(bordered);
         self.shared.notify(cx);
     }
 }

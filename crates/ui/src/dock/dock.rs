@@ -47,10 +47,15 @@ impl DockAreaRenderer for DockSkin {
 
     fn split_frame(&self, node: NodeId, _: Axis, _: &mut Window, cx: &mut App) -> Stateful<Div> {
         // The size is base's; the background is this skin's, and is the only
-        // reason this hook is implemented at all.
+        // reason this hook is implemented at all. It fills with the `dock`
+        // token (which falls back to `tab_bar`, so the default look is
+        // unchanged) rather than `tab_bar` directly: the centre root is a
+        // split too, so this fill is what shows through a transparent tiles
+        // canvas, and a consumer that makes the dock see-through needs one
+        // token that covers both.
         div()
             .id(("dock-split-frame", node.as_u64()))
-            .bg(cx.theme().tokens.tab_bar)
+            .bg(cx.theme().tokens.dock)
     }
 
     fn render_dock(
@@ -243,17 +248,20 @@ mod tests {
     use std::rc::Rc;
 
     use gpui::{
-        App, Entity, IntoElement as _, Modifiers, MouseButton, TestAppContext, VisualTestContext,
-        Window, point, px, size,
+        App, Axis, Background, Div, Entity, Fill, Hsla, IntoElement as _, Modifiers, MouseButton,
+        Stateful, Styled as _, TestAppContext, VisualTestContext, Window, point, px, size,
     };
 
     use std::cell::Cell;
 
-    use gpui_base::dock::DockAreaRenderer;
+    use gpui_base::dock::{DockAreaRenderer, NodeId};
 
-    use crate::dock::{
-        DockArea, DockLayout, DockPlacement, DockSkin,
-        test_support::{MeasuredProbe, SizedProbe},
+    use crate::{
+        ActiveTheme as _, Theme,
+        dock::{
+            DockArea, DockLayout, DockPlacement, DockSkin,
+            test_support::{MeasuredProbe, SizedProbe},
+        },
     };
 
     /// A renderer that draws no chrome at all: every hook at its trait default.
@@ -298,6 +306,91 @@ mod tests {
         ) -> gpui::AnyElement {
             gpui::Empty.into_any_element()
         }
+    }
+
+    /// `DockSkin`, but remembering the last split node base asked it to frame,
+    /// so a test can call the hook itself with a node id that exists (base
+    /// mints them; nothing outside it can).
+    struct RecordingDockSkin {
+        inner: Rc<DockSkin>,
+        seen: Rc<Cell<Option<NodeId>>>,
+    }
+
+    impl DockAreaRenderer for RecordingDockSkin {
+        fn tab_group_renderer(&self) -> Rc<dyn gpui_base::dock::TabGroupRenderer> {
+            self.inner.tab_group_renderer()
+        }
+
+        fn tiles_renderer(&self) -> Rc<dyn gpui_base::dock::TilesRenderer> {
+            self.inner.tiles_renderer()
+        }
+
+        fn split_frame(
+            &self,
+            node: NodeId,
+            axis: Axis,
+            window: &mut Window,
+            cx: &mut App,
+        ) -> Stateful<Div> {
+            self.seen.set(Some(node));
+            self.inner.split_frame(node, axis, window, cx)
+        }
+    }
+
+    /// A split container — the centre root included, since base wraps the
+    /// centre in one — fills with the `dock` token, not the tab bar's.
+    ///
+    /// A consumer whose window shows through its tiles relies on this: with
+    /// the centre root a split, an opaque tab-bar fill behind a transparent
+    /// tiles canvas would hide the window anyway, and the tab bar itself must
+    /// keep its fill.
+    #[gpui::test]
+    fn should_fill_a_split_frame_with_the_dock_token(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let seen = Rc::new(Cell::new(None));
+        let recorder = seen.clone();
+        let mut skin_slot = None;
+        let (area, cx) = cx.add_window_view(|window, cx| {
+            let inner = DockSkin::new(cx);
+            skin_slot = Some(inner.clone());
+            DockArea::new("test", None, window, cx).with_renderer(Rc::new(RecordingDockSkin {
+                inner,
+                seen: recorder,
+            }))
+        });
+        let skin = skin_slot.expect("the skin was built inside the constructor");
+        cx.update(|window, cx| {
+            area.update(cx, |area, cx| {
+                let probe = SizedProbe::new(Rc::new(Cell::new(gpui::Size::default())), cx);
+                area.set_center(DockLayout::tabs().panel(probe), window, cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let node = seen.get().expect("base frames the centre root as a split");
+
+        cx.update(|window, cx| {
+            let transparent = Hsla {
+                h: 0.,
+                s: 0.,
+                l: 0.,
+                a: 0.,
+            };
+            cx.global_mut::<Theme>().tokens.dock = transparent.into();
+            let tab_bar = cx.theme().tokens.tab_bar.background;
+            assert_ne!(
+                tab_bar,
+                Background::from(transparent),
+                "the tab bar keeps its own fill"
+            );
+
+            let mut frame = skin.split_frame(node, Axis::Horizontal, window, cx);
+            assert_eq!(
+                frame.style().background,
+                Some(Fill::Color(transparent.into())),
+                "the split frame must paint the dock token"
+            );
+        });
     }
 
     /// A dock's box is base's, not its renderer's.

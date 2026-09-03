@@ -214,6 +214,9 @@ impl TilesRenderer for TilesSkin {
 
     fn tile_frame(&self, tile: &TileContext, _: &mut Window, cx: &mut App) -> Stateful<Div> {
         let title_bar = shows_title_bar(tile, cx);
+        let bordered = self.shared.tiles_bordered();
+        let border = cx.theme().border;
+        let radius = cx.theme().tile_radius;
         v_flex()
             .id(("tile", tile.panel_id().as_u64()))
             .occlude()
@@ -228,9 +231,11 @@ impl TilesRenderer for TilesSkin {
             // an ambient layer painted behind the dock, without the frame's own
             // opaque fill blocking it.
             .bg(cx.theme().tokens.tiles)
-            .border_1()
-            .border_color(cx.theme().border)
-            .rounded(cx.theme().tile_radius)
+            // The frame's own chrome — a 1px `border` hairline with the tile
+            // radius — unless the consumer's panels paint their own edge.
+            .when(bordered, |this| {
+                this.border_1().border_color(border).rounded(radius)
+            })
             // Room for the title bar, which is positioned over the padding so
             // the panel below it is never covered. Base draws the panel view
             // as a plain child, so this is the only way to keep the two from
@@ -245,8 +250,10 @@ impl TilesRenderer for TilesSkin {
             // border overlaps this tile's instead of stacking beside it into
             // a double-width line. Base pins `w`/`h` to the stored bounds
             // after this hook, so the growth rides on the min size, which
-            // wins over the pinned size and which base leaves alone.
-            .when(!tile.is_zoomed(), |this| {
+            // wins over the pinned size and which base leaves alone. Only
+            // with a border to overlap: a borderless tile is exactly its
+            // stored bounds.
+            .when(bordered && !tile.is_zoomed(), |this| {
                 this.min_w(tile.bounds().size.width + px(1.))
                     .min_h(tile.bounds().size.height + px(1.))
             })
@@ -471,7 +478,7 @@ mod tests {
     use super::*;
     use crate::dock::{
         DockSkin, panel_handle,
-        test_support::{MeasuredProbe, TitlelessProbe},
+        test_support::{MeasuredProbe, SizedProbe, TitlelessProbe},
     };
 
     /// A dock area wearing `DockSkin`, with one 380×280 tile at (20, 20) in
@@ -645,6 +652,56 @@ mod tests {
             first_tile_bounds(&area, cx),
             ONE_TILE,
             "with the handles off, a corner drag must leave the tile's bounds alone"
+        );
+    }
+
+    /// [`tile_area_with`] around a [`SizedProbe`], returning what the probe
+    /// measured itself at.
+    fn sized_tile_area(
+        cx: &mut TestAppContext,
+    ) -> (
+        Rc<Cell<gpui::Size<Pixels>>>,
+        Rc<DockSkin>,
+        &mut VisualTestContext,
+    ) {
+        let measured = Rc::new(Cell::new(size(px(0.), px(0.))));
+        let probe = measured.clone();
+        let (_area, skin, cx) =
+            tile_area_with(cx, move |cx| panel_handle(SizedProbe::new(probe, cx)));
+        (measured, skin, cx)
+    }
+
+    /// The control for the borderless test below: with the skin's frame
+    /// chrome on (the default), the tile's 1px border takes some of the
+    /// stored width from the panel.
+    #[gpui::test]
+    fn should_keep_a_panel_inside_the_tile_border_by_default(cx: &mut TestAppContext) {
+        let (measured, skin, _cx) = sized_tile_area(cx);
+        assert!(skin.tiles_bordered(), "the frame chrome is on by default");
+
+        let panel = measured.get();
+        assert!(
+            panel.width > px(0.) && panel.width < ONE_TILE.size.width,
+            "the border must take some of the tile's width from the panel; it got {panel:?}"
+        );
+    }
+
+    /// With the frame chrome off, the panel gets the whole stored bounds —
+    /// no border, no extra pixel of growth; only the title strip is kept.
+    /// A consumer whose panels paint their own edge relies on this so a
+    /// tile carries one border, not two, and a tile at the canvas origin
+    /// shows no stray hairline.
+    #[gpui::test]
+    fn should_give_a_panel_the_whole_tile_when_the_skin_turns_borders_off(cx: &mut TestAppContext) {
+        let (measured, skin, cx) = sized_tile_area(cx);
+        cx.update(|_, cx| skin.set_tiles_bordered(false, cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        assert_eq!(
+            measured.get(),
+            size(ONE_TILE.size.width, ONE_TILE.size.height - DRAG_BAR_HEIGHT),
+            "a borderless tile's panel must be exactly the stored bounds below the drag bar"
         );
     }
 

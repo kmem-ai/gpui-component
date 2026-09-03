@@ -299,6 +299,11 @@ pub struct ThemeColor {
     pub status_bar_border: Hsla,
     /// Background color for Tiles.
     pub tiles: Hsla,
+    /// Background color for the dock area's split containers: what shows through the gutters
+    /// between panes and behind a tiles canvas. Falls back to `tab_bar`, the fill those containers
+    /// always had, so a theme that leaves it unset looks the same; one that wants the window to show
+    /// through the dock sets it (and `tiles`) transparent.
+    pub dock: Hsla,
     /// Warning background color.
     pub warning: Hsla,
     /// Warning active background color.
@@ -495,6 +500,7 @@ define_theme_tokens! {
     status_bar,
     status_bar_border,
     tiles,
+    dock,
     warning,
     warning_active,
     warning_hover,
