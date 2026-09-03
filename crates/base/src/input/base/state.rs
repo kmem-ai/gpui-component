@@ -1042,6 +1042,15 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx.notify();
     }
 
+    /// Show the caret even unfocused (the empty composer's only affordance is its blink).
+    ///
+    /// Mode-independent: a chat composer is a textarea, a search box a single-line input, and
+    /// both may want the idle blink.
+    pub fn caret_always(mut self, caret_always: bool) -> Self {
+        self.caret_always = caret_always;
+        self
+    }
+
     /// Set whether to show whitespace characters.
     #[doc(hidden)]
     pub fn show_whitespaces(mut self, show: bool) -> Self {
@@ -5154,6 +5163,27 @@ mod tests {
     }
 
     #[gpui::test]
+    fn should_show_the_caret_unfocused_on_a_textarea_when_caret_always_is_set(
+        cx: &mut TestAppContext,
+    ) {
+        // The builder is mode-independent: the chat composer that motivates it is a textarea.
+        cx.update(crate::init);
+        let input_view = InputView::build_textarea(cx, |state| state.caret_always(true));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                assert!(!state.focus_handle.is_focused(window));
+                assert!(state.show_cursor(window, cx));
+            });
+        });
+    }
+
+    #[gpui::test]
     fn should_hide_the_caret_unfocused_by_default(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let input_view = InputView::build(cx, |state| state);
@@ -5249,12 +5279,6 @@ impl InputBaseState<crate::input::InputMode> {
     pub fn set_masked(&mut self, masked: bool, _: &mut Window, cx: &mut Context<Self>) {
         self.masked = masked;
         cx.notify();
-    }
-
-    /// Show the caret even unfocused (the empty composer's only affordance is its blink).
-    pub fn caret_always(mut self, caret_always: bool) -> Self {
-        self.caret_always = caret_always;
-        self
     }
 
     /// Set the regular expression pattern of the input field.
