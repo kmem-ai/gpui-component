@@ -332,6 +332,13 @@ impl TilesRenderer for TilesSkin {
         _: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
+        // A canvas whose geometry is owned externally (see
+        // `DockSkin::set_tiles_resizable`) shows no resize affordances at all — not
+        // the edge grips, not the bottom-right resize corner — since a user resize
+        // would be undone by the owning layout on the next frame.
+        if !self.shared.tiles_resizable() {
+            return Empty.into_any_element();
+        }
         let bounds = tile.bounds();
 
         // A passive full-tile box so each handle is positioned against the
@@ -442,11 +449,118 @@ impl TilesRenderer for TilesSkin {
 mod tests {
     use std::cell::Cell;
 
-    use gpui::{Bounds, TestAppContext, point, size};
-    use gpui_base::dock::{DockArea, DockLayout};
+    use gpui::{Bounds, Entity, Modifiers, TestAppContext, VisualTestContext, point, size};
+    use gpui_base::dock::{DockArea, DockLayout, PanelInfo, PanelState};
 
     use super::*;
     use crate::dock::{DockSkin, panel_handle, test_support::MeasuredProbe};
+
+    /// A dock area wearing `DockSkin`, with one 380×280 tile at (20, 20) in
+    /// its center canvas, drawn once so its handles can be hit.
+    fn one_tile_area(
+        cx: &mut TestAppContext,
+    ) -> (Entity<DockArea>, Rc<DockSkin>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+        });
+        let mut skin_slot = None;
+        let (area, cx) = cx.add_window_view(|window, cx| {
+            let skin = DockSkin::new(cx);
+            skin_slot = Some(skin.clone());
+            DockArea::new("skin", None, window, cx).with_renderer(skin)
+        });
+        let skin = skin_slot.expect("the skin was built inside the constructor");
+
+        cx.update(|window, cx| {
+            let panel = MeasuredProbe::new(Rc::new(Cell::new(px(0.))), cx);
+            let layout = DockLayout::tiles().tile_view(panel_handle(panel), ONE_TILE, cx);
+            area.update(cx, |area, cx| area.set_center(layout, window, cx));
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        (area, skin, cx)
+    }
+
+    const ONE_TILE: Bounds<Pixels> = Bounds {
+        origin: point(px(20.), px(20.)),
+        size: size(px(380.), px(280.)),
+    };
+
+    /// The bounds the dock area reports for its first tile.
+    fn first_tile_bounds(area: &Entity<DockArea>, cx: &mut VisualTestContext) -> Bounds<Pixels> {
+        fn first_tile(state: &PanelState) -> Option<Bounds<Pixels>> {
+            if let PanelInfo::Tiles { metas } = &state.info {
+                return metas.first().map(|meta| meta.bounds);
+            }
+            state.children.iter().find_map(first_tile)
+        }
+        cx.update(|_, cx| {
+            first_tile(&area.read(cx).dump(cx).center).expect("a tiles node holding one tile")
+        })
+    }
+
+    /// Press the tile's bottom-right resize corner and drag it 40px out.
+    ///
+    /// The corner handle hangs `HANDLE_OFFSET` past the tile's painted edge
+    /// (which is one pixel past the stored bounds), so a point two pixels
+    /// inside the stored corner is inside the handle.
+    fn drag_the_resize_corner(cx: &mut VisualTestContext) {
+        let corner = ONE_TILE.bottom_right() - point(px(2.), px(2.));
+        let travel = point(px(40.), px(40.));
+        cx.simulate_mouse_down(corner, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        // The first move past the drag threshold starts the drag; the next
+        // one is the drag move the handle resizes on.
+        cx.simulate_mouse_move(
+            corner + travel.map(|v| v.half()),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_move(corner + travel, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_up(corner + travel, MouseButton::Left, Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    /// The control for the gate test below: with handles on (the default),
+    /// the same gesture grows the tile.
+    #[gpui::test]
+    fn should_resize_a_tile_from_its_corner_handle_by_default(cx: &mut TestAppContext) {
+        let (area, skin, cx) = one_tile_area(cx);
+        assert!(
+            skin.tiles_resizable(),
+            "handles are on unless a consumer turns them off"
+        );
+
+        drag_the_resize_corner(cx);
+
+        let after = first_tile_bounds(&area, cx);
+        assert!(
+            after.size.width > ONE_TILE.size.width && after.size.height > ONE_TILE.size.height,
+            "dragging the corner handle must grow the tile; it is {after:?}"
+        );
+    }
+
+    /// A consumer that owns tile geometry (an external layout solver) turns
+    /// the handles off, and then the corner gesture reaches nothing: the tile
+    /// keeps the bounds the owner gave it.
+    #[gpui::test]
+    fn should_render_no_resize_handles_when_the_skin_turns_them_off(cx: &mut TestAppContext) {
+        let (area, skin, cx) = one_tile_area(cx);
+        cx.update(|_, cx| skin.set_tiles_resizable(false, cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        drag_the_resize_corner(cx);
+
+        assert_eq!(
+            first_tile_bounds(&area, cx),
+            ONE_TILE,
+            "with the handles off, a corner drag must leave the tile's bounds alone"
+        );
+    }
 
     /// A tile's panel view has to be given a size.
     ///

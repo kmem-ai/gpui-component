@@ -84,6 +84,12 @@ pub(crate) struct SkinShared {
     panel_style: Cell<PanelStyle>,
     toggle_button_visible: Cell<bool>,
     tiles_scrollbar_mode: Cell<Option<ScrollbarMode>>,
+    /// Whether tiles draw their per-tile drag-resize handles (the edge grips + the
+    /// bottom-right resize corner). `true` by default — the historical behaviour. A
+    /// consumer that owns tile geometry itself (an external layout solver placing and
+    /// sizing every tile) turns them off, so no tile shows a resize affordance it
+    /// cannot honour.
+    tiles_resizable: Cell<bool>,
     /// The dock whose resize handle is being dragged, if any. Only one can be.
     resizing_dock: Cell<Option<DockPlacement>>,
 }
@@ -103,6 +109,10 @@ impl SkinShared {
 
     pub(crate) fn tiles_scrollbar_mode(&self) -> Option<ScrollbarMode> {
         self.tiles_scrollbar_mode.get()
+    }
+
+    pub(crate) fn tiles_resizable(&self) -> bool {
+        self.tiles_resizable.get()
     }
 
     pub(crate) fn resizing_dock(&self) -> &Cell<Option<DockPlacement>> {
@@ -164,6 +174,7 @@ impl DockSkin {
                 panel_style: Cell::new(PanelStyle::default()),
                 toggle_button_visible: Cell::new(true),
                 tiles_scrollbar_mode: Cell::new(None),
+                tiles_resizable: Cell::new(true),
                 resizing_dock: Cell::new(None),
             }),
         })
@@ -201,6 +212,20 @@ impl DockSkin {
 
     pub fn set_tiles_scrollbar_mode(&self, mode: Option<ScrollbarMode>, cx: &mut App) {
         self.shared.tiles_scrollbar_mode.set(mode);
+        self.shared.notify(cx);
+    }
+
+    /// Whether tiles draw per-tile drag-resize handles. Defaults to `true`.
+    pub fn tiles_resizable(&self) -> bool {
+        self.shared.tiles_resizable()
+    }
+
+    /// Enable or disable per-tile drag-resize handles for every tile in every tiles
+    /// canvas of this area. Set `false` when an outer system owns tile geometry
+    /// (positions and sizes come from a layout solver, not user drags), so the tiles
+    /// show no resize corner/edge handles the layout would immediately undo.
+    pub fn set_tiles_resizable(&self, resizable: bool, cx: &mut App) {
+        self.shared.tiles_resizable.set(resizable);
         self.shared.notify(cx);
     }
 }
