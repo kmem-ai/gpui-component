@@ -24,7 +24,7 @@ use super::{
     InputHighlighterFactory, MASK_CHAR, MaskPattern, NativeMenu, NumberStep, WrappingIndent,
     blink_cursor::BlinkCursor,
     change::Change,
-    element::{EditorScrollbar, EditorScrollbarSnapshot, TextElement},
+    element::{EditorScrollbar, EditorScrollbarSnapshot, TextElement, masked_display_offset},
     kind::InputModeKind,
     mask_pattern::normalize_number_input,
     mode::LayoutMode,
@@ -2317,6 +2317,18 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
     }
 
+    /// Map a text offset to the display byte index the painted line uses — the mirror of
+    /// [`Self::resolve_index`]. A masked input lays out one `MASK_CHAR` per character, so a real-text
+    /// offset has to be widened to that string before it can be located on the line; an unmasked
+    /// input paints its text as is.
+    fn display_index(&self, offset: usize) -> usize {
+        if self.masked {
+            masked_display_offset(&self.text, offset)
+        } else {
+            offset
+        }
+    }
+
     /// Returns a y offsetted point for the line origin.
     /// Select the text from the current cursor position to the given offset.
     ///
@@ -2694,6 +2706,10 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Return the rendered bounds for a UTF-8 byte range in the current input contents.
     ///
+    /// The range is in the real text: a masked input maps it onto its painted mask string first,
+    /// so a caller reading the caret's rect gets the bullet the caret sits at, not the bullet
+    /// whose bytes its offset happens to land inside.
+    ///
     /// Returns `None` when the requested range is not currently laid out or visible.
     pub fn range_to_bounds(&self, range: &Range<usize>) -> Option<Bounds<Pixels>> {
         let Some(last_layout) = self.last_layout.as_ref() else {
@@ -2704,8 +2720,8 @@ impl<M: InputModeKind> InputBaseState<M> {
             return None;
         };
 
-        let (_, _, start_pos) = self.line_and_position_for_offset(range.start);
-        let (_, _, end_pos) = self.line_and_position_for_offset(range.end);
+        let (_, _, start_pos) = self.line_and_position_for_offset(self.display_index(range.start));
+        let (_, _, end_pos) = self.line_and_position_for_offset(self.display_index(range.end));
 
         let Some(start_pos) = start_pos else {
             return None;
@@ -4172,6 +4188,45 @@ mod tests {
                 state.set_value("aaa bbb ccc", window, cx);
                 state.select_word(9, window, cx);
                 assert_eq!(state.selected_range(), 8..11);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_masked_input_range_to_bounds_locates_the_caret_on_the_mask(cx: &mut TestAppContext) {
+        let input_view = InputView::build(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("sk-test-123", window, cx);
+                state.set_masked(true, window, cx);
+            });
+        });
+        cx.run_until_parked();
+
+        cx.update(|_, cx| {
+            input.read_with(cx, |state, _| {
+                let x_at = |offset: usize| {
+                    state
+                        .range_to_bounds(&(offset..offset))
+                        .expect("the initial paint laid the line out")
+                        .origin
+                        .x
+                };
+                let bullet = x_at(1) - x_at(0);
+                assert!(bullet > px(0.), "a painted mask character has a width");
+
+                // The painted line holds one multi-byte `MASK_CHAR` per character, so the real-text
+                // offset 10 must land after the tenth bullet — not inside the fourth, where byte 10
+                // of the mask string falls.
+                let expected = x_at(0) + bullet * 10.;
+                let got = x_at(10);
+                assert!(
+                    (got - expected).abs() < px(0.5),
+                    "caret rect at offset 10: got x={got:?}, expected x={expected:?} (ten bullets)"
+                );
             });
         });
     }

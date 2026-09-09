@@ -330,7 +330,7 @@ use super::MASK_CHAR;
 /// The masked string consists of `MASK_CHAR` repeated once per character in the original text.
 /// Since `MASK_CHAR` may be multi-byte in UTF-8, the byte offset in the masked string is
 /// `char_index * MASK_CHAR.len_utf8()`.
-fn masked_display_offset(text: &Rope, original_offset: usize) -> usize {
+pub(super) fn masked_display_offset(text: &Rope, original_offset: usize) -> usize {
     text.offset_to_char_index(original_offset) * MASK_CHAR.len_utf8()
 }
 
