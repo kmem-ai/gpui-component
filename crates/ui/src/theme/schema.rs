@@ -502,6 +502,9 @@ pub struct ThemeConfigColors {
     /// Input selection background color.
     #[serde(rename = "selection.background")]
     pub selection: Option<SharedString>,
+    /// Optional contrasting ink on the selection background.
+    #[serde(rename = "selection.foreground")]
+    pub selection_foreground: Option<SharedString>,
     /// Sidebar background color.
     #[serde(rename = "sidebar.background")]
     pub sidebar: Option<SharedString>,
@@ -978,6 +981,10 @@ impl ThemeColor {
         apply_background_color!(scrollbar_thumb, fallback = tokens.accent);
         apply_background_color!(scrollbar_thumb_hover, fallback = tokens.scrollbar_thumb);
         apply_background_color!(selection, fallback = tokens.primary);
+        self.selection_foreground = colors
+            .selection_foreground
+            .as_deref()
+            .and_then(|value| try_parse_color(value).ok());
         apply_background_color!(
             sidebar,
             fallback = self.background.blend(self.border.opacity(0.15))
@@ -1053,7 +1060,12 @@ impl ThemeColor {
             colors.selection.as_deref(),
             self.selection,
             tokens.selection.background,
-            0.3,
+            // A supplied foreground makes opaque reverse-video selections readable.
+            if self.selection_foreground.is_some() {
+                1.0
+            } else {
+                0.3
+            },
         );
 
         tokens
@@ -1115,6 +1127,28 @@ mod tests {
     use gpui::{linear_color_stop, linear_gradient, px};
 
     use crate::{Theme, ThemeConfig, ThemeMode, ThemeSet, try_parse_color};
+
+    #[test]
+    fn selection_foreground_allows_an_opaque_selection_background() {
+        let config: ThemeConfig = serde_json::from_value(serde_json::json!({
+            "name": "Inverted", "mode": "dark", "colors": {
+                "selection.background": "#39ff62",
+                "selection.foreground": "#050706"
+            }
+        }))
+        .unwrap();
+        let mut theme = Theme::default();
+        theme.apply_config(&std::rc::Rc::new(config));
+        assert_eq!(theme.selection.a, 1.0);
+        assert_eq!(
+            theme.selection_foreground,
+            Some(try_parse_color("#050706").unwrap())
+        );
+        assert_eq!(
+            theme.semantic_tokens().colors.selection_foreground,
+            theme.selection_foreground
+        );
+    }
 
     #[test]
     fn test_semantic_theme_config_parses_and_roundtrips() {

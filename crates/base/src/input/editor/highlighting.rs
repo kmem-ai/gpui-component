@@ -75,6 +75,8 @@ pub struct InputEditorStyle {
     pub background: Hsla,
     pub border: Hsla,
     pub selection: Hsla,
+    /// Ink for selected glyphs. `None` keeps their normal text/syntax colors.
+    pub selection_foreground: Option<Hsla>,
     pub caret: Hsla,
     pub diagnostics: DiagnosticColors,
     pub highlight_styles: SharedHighlightStyleResolver,
@@ -103,12 +105,7 @@ impl InputEditorStyle {
         let or = |value: Hsla, fallback: Hsla| if unset(value) { fallback } else { value };
 
         let foreground = or(self.foreground, colors.foreground);
-        let mut selection = self.selection;
-        if unset(selection) {
-            selection = colors.accent;
-            // A selection must not hide the glyphs it selects.
-            selection.a = 0.4;
-        }
+        let selection = or(self.selection, colors.selection);
 
         Self {
             foreground,
@@ -116,6 +113,7 @@ impl InputEditorStyle {
             background: or(self.background, colors.surface),
             border: or(self.border, colors.border),
             selection,
+            selection_foreground: self.selection_foreground.or(colors.selection_foreground),
             caret: or(self.caret, foreground),
             ..self.clone()
         }
@@ -130,6 +128,7 @@ impl Default for InputEditorStyle {
             background: Hsla::default(),
             border: Hsla::default(),
             selection: Hsla::default(),
+            selection_foreground: None,
             caret: Hsla::default(),
             diagnostics: DiagnosticColors::default(),
             highlight_styles: Arc::new(NoHighlightStyles),
@@ -183,7 +182,32 @@ mod tests {
     #[test]
     fn a_selection_stays_translucent_enough_to_read_through() {
         let resolved = InputEditorStyle::default().resolved(&dark());
-        assert_eq!(resolved.selection.a, 0.4);
+        assert_eq!(resolved.selection, dark().colors.selection);
+        assert!(resolved.selection.a < 1.);
+        assert_eq!(resolved.selection_foreground, None);
+    }
+
+    #[test]
+    fn selection_colors_follow_the_palette_as_a_pair() {
+        let mut tokens = dark();
+        tokens.colors.selection = tokens.colors.foreground;
+        tokens.colors.selection_foreground = Some(tokens.colors.background);
+        let resolved = InputEditorStyle::default().resolved(&tokens);
+        assert_eq!(resolved.selection, tokens.colors.foreground);
+        assert_eq!(
+            resolved.selection_foreground,
+            Some(tokens.colors.background)
+        );
+    }
+
+    #[test]
+    fn projected_selection_ink_is_not_replaced_by_the_palette() {
+        let ink = hsla(0.2, 0.5, 0.9, 1.);
+        let style = InputEditorStyle {
+            selection_foreground: Some(ink),
+            ..Default::default()
+        };
+        assert_eq!(style.resolved(&dark()).selection_foreground, Some(ink));
     }
 
     #[test]

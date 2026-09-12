@@ -2066,11 +2066,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         let new_range = range.start..range.start + new_text.len();
 
         let intent = requested_intent.unwrap_or_else(|| {
-            if range.is_empty()
-                && old_text.is_empty()
-                && !new_text.is_empty()
-                && !new_text.contains(['\n', '\r'])
-            {
+            // Typing over a selection starts a new typing transaction and subsequent adjacent
+            // characters join it. Paste, cut, and IME explicitly request Atomic and stay separate.
+            if !new_text.is_empty() && !new_text.contains(['\n', '\r']) {
                 EditIntent::Typing
             } else {
                 EditIntent::Atomic

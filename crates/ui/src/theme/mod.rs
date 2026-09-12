@@ -385,6 +385,7 @@ impl Theme {
             input: self.input,
             ring: self.ring,
             selection: self.selection,
+            selection_foreground: self.selection_foreground,
         }
     }
 
@@ -476,6 +477,8 @@ impl Theme {
         self.border = colors.border;
         self.input = colors.input;
         self.ring = colors.ring;
+        self.selection = colors.selection;
+        self.selection_foreground = colors.selection_foreground;
 
         self.tokens.background = colors.background.into();
         self.tokens.popover = colors.surface.into();
@@ -483,6 +486,7 @@ impl Theme {
         self.tokens.secondary = colors.secondary.into();
         self.tokens.muted = colors.muted.into();
         self.tokens.accent = colors.accent.into();
+        self.tokens.selection = colors.selection.into();
         self.tokens.danger = colors.destructive.into();
 
         self.radius = tokens.radius.md;
@@ -536,6 +540,21 @@ mod semantic_token_tests {
 
         assert_eq!(theme.color_tokens().primary, primary);
         assert_eq!(theme.semantic_tokens().colors.primary, primary);
+    }
+
+    #[test]
+    fn selection_colors_round_trip_through_semantic_tokens() {
+        let mut theme = Theme::default();
+        let mut tokens = theme.semantic_tokens();
+        tokens.colors.selection = gpui::white();
+        tokens.colors.selection_foreground = Some(gpui::black());
+        theme.apply_semantic_tokens(&tokens);
+        assert_eq!(theme.color_tokens().selection, gpui::white());
+        assert_eq!(
+            theme.color_tokens().selection_foreground,
+            Some(gpui::black())
+        );
+        assert_eq!(theme.tokens.selection.color, gpui::white());
     }
 
     #[test]

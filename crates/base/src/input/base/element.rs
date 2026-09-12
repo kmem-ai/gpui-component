@@ -1327,6 +1327,27 @@ impl<M: InputModeKind> TextElement<M> {
         window: &mut Window,
     ) -> Vec<LineLayout> {
         let is_single_line = state.is_single_line();
+        // Recolor exactly the same selection whose background is painted below. Apply after
+        // syntax/document-color styling, per visible visual row, so folded/hidden bytes never
+        // shift the selection and changing it never walks the entire document.
+        let selection = state.editor_style.selection_foreground.and_then(|ink| {
+            if !window.is_window_active()
+                || !state.focus_handle.is_focused(window)
+                || state.selected_range.is_empty()
+                || state
+                    .ime_marked_range
+                    .as_ref()
+                    .is_some_and(|r| !r.is_empty())
+            {
+                return None;
+            }
+            let mut range = state.selected_range.start..state.selected_range.end;
+            if state.masked {
+                range = masked_display_offset(&state.text, range.start)
+                    ..masked_display_offset(&state.text, range.end);
+            }
+            Some((range, ink))
+        });
 
         if is_single_line {
             // Shape the whole value as one visual line. `single_line_display` keeps it shapeable when
@@ -1334,6 +1355,10 @@ impl<M: InputModeKind> TextElement<M> {
             // byte offsets, so `runs` and the cursor/selection stay aligned and the stored value keeps
             // its newlines.
             let text: SharedString = single_line_display(display_text.to_string()).into();
+            let selected_runs = selection
+                .as_ref()
+                .map(|(range, ink)| runs_with_selection_ink(0, runs, range.clone(), *ink));
+            let runs = selected_runs.as_deref().unwrap_or(runs);
             let aligned_runs = align_runs_to_char_boundaries(&text, runs);
             let line_runs = aligned_runs.as_deref().unwrap_or(runs);
             let shaped_line = window
@@ -1403,6 +1428,16 @@ impl<M: InputModeKind> TextElement<M> {
                 };
 
                 let sub_line: SharedString = line_text[range.clone()].to_string().into();
+                let line_runs = if let Some((selected, ink)) = &selection {
+                    runs_with_selection_ink(
+                        last_layout.visible_line_byte_offsets[vi] + range.start,
+                        &line_runs,
+                        selected.clone(),
+                        *ink,
+                    )
+                } else {
+                    line_runs
+                };
                 let line_runs =
                     align_runs_to_char_boundaries(&sub_line, &line_runs).unwrap_or(line_runs);
                 let shaped_line = window
@@ -2630,6 +2665,51 @@ fn has_background(runs: &[TextRun]) -> bool {
     runs.iter().any(|run| run.background_color.is_some())
 }
 
+/// Split shaped-text runs at selection boundaries without changing their geometry or byte count.
+/// `start` is the visual row's offset in the displayed buffer, not an offset in the visible runs.
+fn runs_with_selection_ink(
+    start: usize,
+    runs: &[TextRun],
+    selection: Range<usize>,
+    ink: Hsla,
+) -> Vec<TextRun> {
+    let mut result = Vec::with_capacity(runs.len() + 2);
+    let mut offset = start;
+    for run in runs {
+        let end = offset + run.len;
+        let from = offset.max(selection.start);
+        let to = end.min(selection.end);
+        if from >= to {
+            result.push(run.clone());
+        } else {
+            if offset < from {
+                result.push(TextRun {
+                    len: from - offset,
+                    ..run.clone()
+                });
+            }
+            let mut selected = run.clone();
+            selected.len = to - from;
+            selected.color = ink;
+            if let Some(line) = &mut selected.underline {
+                line.color = Some(ink);
+            }
+            if let Some(line) = &mut selected.strikethrough {
+                line.color = Some(ink);
+            }
+            result.push(selected);
+            if to < end {
+                result.push(TextRun {
+                    len: end - to,
+                    ..run.clone()
+                });
+            }
+        }
+        offset = end;
+    }
+    result
+}
+
 fn split_runs_by_bg_segments(
     start_offset: usize,
     runs: &[TextRun],
@@ -2695,6 +2775,72 @@ fn split_runs_by_bg_segments(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn selection_run(len: usize) -> TextRun {
+        TextRun {
+            len,
+            font: gpui::font(".SystemUIFont"),
+            color: gpui::white(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }
+    }
+
+    #[test]
+    fn selection_ink_splits_only_the_selected_bytes() {
+        let runs = runs_with_selection_ink(0, &[selection_run(12)], 3..8, gpui::black());
+        assert_eq!(
+            runs.iter().map(|r| (r.len, r.color)).collect::<Vec<_>>(),
+            vec![(3, gpui::white()), (5, gpui::black()), (4, gpui::white())]
+        );
+    }
+
+    #[test]
+    fn selection_ink_uses_the_wrapped_rows_absolute_offset() {
+        let runs = runs_with_selection_ink(100, &[selection_run(10)], 95..104, gpui::black());
+        assert_eq!(
+            runs.iter().map(|r| (r.len, r.color)).collect::<Vec<_>>(),
+            vec![(4, gpui::black()), (6, gpui::white())]
+        );
+    }
+
+    #[test]
+    fn selection_ink_preserves_unicode_byte_boundaries() {
+        let text = "a🦀éz";
+        let runs = runs_with_selection_ink(0, &[selection_run(text.len())], 1..7, gpui::black());
+        let mut offset = 0;
+        for run in &runs {
+            offset += run.len;
+            assert!(text.is_char_boundary(offset));
+        }
+        assert_eq!(offset, text.len());
+        assert_eq!(runs[1].len, "🦀é".len());
+    }
+
+    #[test]
+    fn selection_ink_preserves_font_and_changes_decoration_ink() {
+        let mut run = selection_run(4);
+        run.underline = Some(UnderlineStyle {
+            thickness: px(2.),
+            color: Some(gpui::red()),
+            wavy: true,
+        });
+        let runs = runs_with_selection_ink(0, &[run.clone()], 0..4, gpui::black());
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].font, run.font);
+        assert_eq!(runs[0].underline.unwrap().color, Some(gpui::black()));
+        assert_eq!(runs[0].underline.unwrap().thickness, px(2.));
+        assert!(runs[0].underline.unwrap().wavy);
+    }
+
+    #[test]
+    fn selection_ink_leaves_unselected_runs_unchanged() {
+        let runs = runs_with_selection_ink(50, &[selection_run(6)], 0..20, gpui::black());
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].len, 6);
+        assert_eq!(runs[0].color, gpui::white());
+    }
 
     #[test]
     fn test_plain_text_decorations_include_unstyled_gaps() {

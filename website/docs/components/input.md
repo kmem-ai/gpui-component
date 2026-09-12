@@ -211,6 +211,14 @@ div()
     .child(Input::new(&input).appearance(false))
 ```
 
+### Selected text colors
+
+`selection.background` is the theme's selection fill. Set `selection.foreground` as well for
+an opaque, inverted selection; when it is absent, selected glyphs keep their normal colors and
+the background keeps its translucent cap. Both values also flow through semantic theme tokens.
+This applies to Input, Textarea, and Editor, including wrapped and masked text. Base consumers
+can provide the same pair through `InputEditorStyle`.
+
 ### Context Menu
 
 ```rust

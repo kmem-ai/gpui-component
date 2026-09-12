@@ -42,6 +42,9 @@ pub struct ColorTokens {
     /// palettes written before the token existed still load.
     #[serde(default = "ColorTokens::default_selection")]
     pub selection: Hsla,
+    /// Optional contrasting ink for text on the selection background.
+    #[serde(default)]
+    pub selection_foreground: Option<Hsla>,
 }
 
 impl Default for ColorTokens {
@@ -72,6 +75,7 @@ impl ColorTokens {
             input: hsla(0., 0., 0.898, 1.),
             ring: hsla(0., 0., 0.639, 1.),
             selection: Hsla::from(rgb(0x55a0fc)).alpha(0.3),
+            selection_foreground: None,
         }
     }
 
@@ -96,6 +100,7 @@ impl ColorTokens {
             input: hsla(0., 0., 47. / 255., 1.),
             ring: hsla(0., 0., 0.451, 1.),
             selection: Hsla::from(rgb(0x1d4ed8)).alpha(0.3),
+            selection_foreground: None,
         }
     }
 

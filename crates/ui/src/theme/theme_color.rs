@@ -225,6 +225,9 @@ pub struct ThemeColor {
     pub secondary_hover: Hsla,
     /// Input selection background color.
     pub selection: Hsla,
+    /// Optional ink for selected text. Unset preserves normal glyph colors.
+    #[serde(default)]
+    pub selection_foreground: Option<Hsla>,
     /// Sidebar background color.
     pub sidebar: Hsla,
     /// Sidebar accent background color.

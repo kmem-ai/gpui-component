@@ -174,8 +174,8 @@ impl UndoManager {
 fn is_adjacent(intent: EditIntent, previous: &Change, current: &Change) -> bool {
     match intent {
         EditIntent::Typing => {
-            previous.old_range.is_empty()
-                && current.old_range.is_empty()
+            // A replacement may begin the group; another replacement must begin a new one.
+            current.old_range.is_empty()
                 && !previous.new_text.contains(['\n', '\r'])
                 && !current.new_text.contains(['\n', '\r'])
                 && previous.new_range.end == current.old_range.start
@@ -219,6 +219,48 @@ mod tests {
 
         assert_eq!(manager.undo().unwrap().len(), 2);
         assert!(manager.undo().is_none());
+    }
+
+    #[test]
+    fn typing_after_a_selection_replacement_is_one_undo_transaction() {
+        let mut manager = UndoManager::new();
+        manager.record_transaction(
+            Change::new(
+                0..5,
+                "draft",
+                0..1,
+                "n",
+                Selection::new(0, 5),
+                Selection::new(1, 1),
+            ),
+            EditIntent::Typing,
+        );
+        manager.record_transaction(typing_change(1, "e"), EditIntent::Typing);
+        manager.record_transaction(typing_change(2, "w"), EditIntent::Typing);
+        let undo = manager.undo().unwrap();
+        assert_eq!(undo.len(), 3);
+        assert_eq!(undo.last().unwrap().old_text, "draft");
+        assert!(manager.undo().is_none());
+        assert_eq!(manager.redo().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_second_selection_replacement_starts_a_separate_transaction() {
+        let mut manager = UndoManager::new();
+        manager.record_transaction(typing_change(0, "a"), EditIntent::Typing);
+        manager.record_transaction(
+            Change::new(
+                0..1,
+                "a",
+                0..1,
+                "b",
+                Selection::new(0, 1),
+                Selection::new(1, 1),
+            ),
+            EditIntent::Typing,
+        );
+        assert_eq!(manager.undo().unwrap().len(), 1);
+        assert_eq!(manager.undo().unwrap().len(), 1);
     }
 
     #[test]
