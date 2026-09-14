@@ -103,6 +103,7 @@ pub(crate) const COLOR_TOKEN_NAMES: &[&str] = &[
     "input",
     "ring",
     "selection",
+    "selection_foreground",
 ];
 
 pub(crate) const SPACING_TOKEN_NAMES: &[&str] = &["xxs", "xs", "sm", "md", "lg", "xl", "xxl"];
@@ -138,6 +139,9 @@ pub(crate) fn resolve_color(colors: &ColorTokens, name: &str) -> Option<Hsla> {
         "input" => colors.input,
         "ring" => colors.ring,
         "selection" => colors.selection,
+        // `selection_foreground` is optional (None = no contrasting-ink override); fall back to the
+        // selection background so the name always resolves to a concrete colour like the other arms.
+        "selection_foreground" => colors.selection_foreground.unwrap_or(colors.selection),
         _ => return None,
     })
 }
