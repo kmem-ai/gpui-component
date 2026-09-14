@@ -159,6 +159,17 @@ fn apply_colors(
     supplied: &HashMap<String, String>,
 ) -> Result<(), String> {
     for name in theme_tokens::color_token_names() {
+        // `selection_foreground` is optional (None = no contrasting-ink override): a theme object
+        // that omits it keeps the current value, it is not a "missing token" error like the rest.
+        if *name == "selection_foreground" {
+            if let Some(source) = supplied.get(*name) {
+                let value = Bridged::Str(source.clone())
+                    .as_color()
+                    .map_err(|e| format!("theme color `{name}`: {e}"))?;
+                colors.selection_foreground = Some(value);
+            }
+            continue;
+        }
         let source = supplied
             .get(*name)
             .ok_or_else(|| format!("theme tokens.colors is missing `{name}`"))?;
