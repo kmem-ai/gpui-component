@@ -4351,7 +4351,11 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_undo_manager_selected_replacement_is_atomic(cx: &mut TestAppContext) {
+    fn test_undo_a_selected_replacement_plus_typing_is_one_edit(cx: &mut TestAppContext) {
+        // 2026-09-12 (05f994db): typing over a selection and the characters typed right after it are
+        // ONE undo transaction — "undo replacements as one edit". So replacing "b" with "X" and then
+        // typing "z" undoes together, straight back to the pre-replacement value (the matching
+        // undo_manager unit test is `typing_after_a_selection_replacement_is_one_undo_transaction`).
         let input_view = InputView::build(cx, |state| state);
         let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
         let input = input_view.input;
@@ -4364,10 +4368,10 @@ mod tests {
                 state.replace_text_in_range(None, "z", window, cx);
                 assert_eq!(state.value(), "aXzc");
 
-                state.undo(&Undo, window, cx);
-                assert_eq!(state.value(), "aXc");
+                // The replacement "X" and the trailing "z" are one edit: one undo restores "abc".
                 state.undo(&Undo, window, cx);
                 assert_eq!(state.value(), "abc");
+                // The remaining transaction is the initial "abc" insert.
                 state.undo(&Undo, window, cx);
                 assert_eq!(state.value(), "");
             });
